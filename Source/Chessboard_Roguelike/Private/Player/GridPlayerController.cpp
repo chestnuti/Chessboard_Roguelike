@@ -5,12 +5,42 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "Player/GridPawn.h"
+#include "Player/PlayerAttributeComponent.h"
+#include "UI/PlayerAttributeHUDWidget.h"
+#include "UObject/ConstructorHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridPlayerController, Log, All);
+
+AGridPlayerController::AGridPlayerController()
+{
+	PlayerAttributeHUDClass = UPlayerAttributeHUDWidget::StaticClass();
+
+	// Prefer the authored WBP asset when present, with the native widget as a safe fallback.
+	static ConstructorHelpers::FClassFinder<UPlayerAttributeHUDWidget> PlayerAttributeHUDWidgetClass(
+		TEXT("/Game/UI/WBP_PlayerAttributeHUD"));
+	if (PlayerAttributeHUDWidgetClass.Succeeded())
+	{
+		PlayerAttributeHUDClass = PlayerAttributeHUDWidgetClass.Class;
+	}
+}
 
 void AGridPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (IsLocalController() && PlayerAttributeHUDClass)
+	{
+		// HUD is read-only and updates by subscribing to the pawn's attribute component.
+		PlayerAttributeHUD = CreateWidget<UPlayerAttributeHUDWidget>(this, PlayerAttributeHUDClass);
+		if (PlayerAttributeHUD)
+		{
+			if (APawn* ControlledPawn = GetPawn())
+			{
+				PlayerAttributeHUD->InitializeFromAttributeComponent(ControlledPawn->FindComponentByClass<UPlayerAttributeComponent>());
+			}
+			PlayerAttributeHUD->AddToViewport();
+		}
+	}
 
 	if (!GridMovementMappingContext)
 	{
@@ -22,6 +52,7 @@ void AGridPlayerController::BeginPlay()
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
 		{
+			// Context is added once on BeginPlay; each key press is handled by action Started events.
 			Subsystem->AddMappingContext(GridMovementMappingContext, 0);
 		}
 	}
@@ -40,6 +71,7 @@ void AGridPlayerController::SetupInputComponent()
 
 	if (MoveUpAction)
 	{
+		// Started behaves like a single press for Boolean actions and still respects pawn movement locks.
 		EnhancedInputComponent->BindAction(MoveUpAction, ETriggerEvent::Started, this, &AGridPlayerController::MoveUp);
 	}
 	if (MoveDownAction)
@@ -85,5 +117,6 @@ void AGridPlayerController::RequestPawnMove(FIntPoint Direction)
 		return;
 	}
 
+	// Controller translates input into grid directions; the pawn/GridManager validate the move.
 	GridPawn->TryMove(Direction);
 }

@@ -22,6 +22,7 @@ AGridManager::AGridManager()
 void AGridManager::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	// Rebuild editor preview whenever GridSettings or actor transform changes.
 	GenerateGrid();
 }
 
@@ -41,6 +42,7 @@ void AGridManager::GenerateGrid()
 
 	if (TileISM)
 	{
+		// Regeneration starts from a clean visual layer to match the rebuilt Tiles map.
 		TileISM->ClearInstances();
 		if (GridSettings && GridSettings->TileMesh)
 		{
@@ -69,6 +71,7 @@ void AGridManager::GenerateGrid()
 		{
 			const FIntPoint Coord(X, Y);
 
+			// Every tile starts with deterministic defaults before optional authored overrides.
 			FTileData TileData;
 			TileData.GridCoord = Coord;
 			TileData.TileType = ETileType::Minimal;
@@ -77,12 +80,26 @@ void AGridManager::GenerateGrid()
 			TileData.bWalkable = TileData.TileType != ETileType::Obstacle;
 			TileData.bConvertible = true;
 
+			// Apply authored prototype tile types after defaults so unlisted tiles remain Minimal.
+			if (const FGridInitialTileOverride* TileOverride = GridSettings->InitialTileOverrides.FindByPredicate(
+				[Coord](const FGridInitialTileOverride& Candidate)
+				{
+					return Candidate.GridCoord == Coord;
+				}))
+			{
+				TileData.TileType = TileOverride->TileType;
+				TileData.bWalkable = TileOverride->bWalkable && TileData.TileType != ETileType::Obstacle;
+				TileData.bConvertible = TileOverride->bConvertible;
+				TileData.OccupantType = TileData.TileType == ETileType::Obstacle ? EGridOccupantType::Obstacle : EGridOccupantType::Empty;
+			}
+
 			Tiles.Add(Coord, TileData);
 
 			if (TileISM && GridSettings->TileMesh)
 			{
 				FVector InstanceScale = FVector::OneVector;
 				const FVector MeshSize = GridSettings->TileMesh->GetBounds().BoxExtent * 2.f;
+				// Scale the visual mesh to TileSize so changing settings affects both logic and display.
 				if (MeshSize.X > KINDA_SMALL_NUMBER)
 				{
 					InstanceScale.X = GridSettings->TileSize / MeshSize.X;
@@ -118,10 +135,55 @@ bool AGridManager::IsOccupied(FIntPoint Coord) const
 	return TileData && TileData->OccupantType != EGridOccupantType::Empty;
 }
 
+bool AGridManager::GetTileData(const FIntPoint& Coord, FTileData& OutTileData) const
+{
+	const FTileData* TileData = Tiles.Find(Coord);
+	if (!TileData)
+	{
+		return false;
+	}
+
+	OutTileData = *TileData;
+	return true;
+}
+
+bool AGridManager::SetTileType(const FIntPoint& Coord, ETileType NewTileType)
+{
+	FTileData* TileData = Tiles.Find(Coord);
+	if (!TileData)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("SetTileType failed: invalid coord (%d,%d)."), Coord.X, Coord.Y);
+		return false;
+	}
+
+	if (TileData->TileType == NewTileType)
+	{
+		return true;
+	}
+
+	// Change only the terrain type; movement occupancy and walkability are managed by the grid movement layer.
+	TileData->TileType = NewTileType;
+	RefreshTileInstanceVisual(Coord, NewTileType);
+	OnTileTypeChanged.Broadcast(Coord, NewTileType);
+	return true;
+}
+
+void AGridManager::RefreshTileInstanceVisual_Implementation(const FIntPoint& Coord, ETileType NewTileType)
+{
+	// Blueprint GridManager variants can override this to recolor or swap one tile instance without rebuilding the grid.
+}
+
+bool AGridManager::IsTileConvertible(const FIntPoint& Coord) const
+{
+	const FTileData* TileData = Tiles.Find(Coord);
+	return TileData && TileData->bConvertible && TileData->TileType != ETileType::Obstacle;
+}
+
 FVector AGridManager::GridToWorld(FIntPoint Coord) const
 {
 	const float TileSize = GridSettings ? GridSettings->TileSize : 200.f;
 	const FVector Origin = GridSettings ? GridSettings->Origin : FVector::ZeroVector;
+	// World position is presentation only; the authoritative location is still Coord.
 	return Origin + FVector(Coord.X * TileSize, Coord.Y * TileSize, 0.f);
 }
 
@@ -141,6 +203,7 @@ FIntPoint AGridManager::WorldToGrid(FVector WorldLocation) const
 
 bool AGridManager::TryOccupyTile(FIntPoint Coord, AActor* Occupant, EGridOccupantType OccupantType)
 {
+	// Placement is allowed only on existing, walkable, currently empty tiles.
 	if (!Occupant || OccupantType == EGridOccupantType::Empty)
 	{
 		UE_LOG(LogGridManager, Warning, TEXT("TryOccupyTile failed at (%d,%d): invalid occupant."), Coord.X, Coord.Y);
@@ -186,6 +249,7 @@ void AGridManager::ClearOccupant(FIntPoint Coord)
 
 bool AGridManager::RequestMove(AActor* Unit, FIntPoint FromCoord, FIntPoint ToCoord)
 {
+	// Validate everything up front so failed moves leave the grid unchanged.
 	if (!Unit)
 	{
 		UE_LOG(LogGridManager, Warning, TEXT("RequestMove failed: Unit is null."));
@@ -231,6 +295,7 @@ bool AGridManager::RequestMove(AActor* Unit, FIntPoint FromCoord, FIntPoint ToCo
 
 	FTileData* MutableTargetTile = Tiles.Find(ToCoord);
 	check(MutableTargetTile);
+	// Preserve the moving occupant type for later enemy/unit reuse while the pawn remains caller-owned.
 	MutableTargetTile->OccupantType = MovingOccupantType;
 	MutableTargetTile->OccupantActor = Unit;
 	return true;

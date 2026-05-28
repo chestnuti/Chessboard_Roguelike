@@ -26,11 +26,13 @@ void ATurnManager::SetTurnState(ETurnState NewState)
 
 void ATurnManager::BeginPlayerAction()
 {
+	// Enter the action-resolve lock before gameplay state changes that should reject input.
 	SetTurnState(ETurnState::PlayerActionResolve);
 }
 
 void ATurnManager::EndPlayerAction()
 {
+	// Return control only after the current action has fully resolved.
 	SetTurnState(ETurnState::PlayerInput);
 }
 

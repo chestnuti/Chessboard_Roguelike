@@ -16,9 +16,11 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Turn")
 	ETurnState CurrentTurnState = ETurnState::Initializing;
 
+	// Counts only confirmed legal player moves.
 	UPROPERTY(BlueprintReadOnly, Category = "Turn")
 	int32 StepCount = 0;
 
+	// Gate used by pawn input code to enforce the basic turn lock.
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Turn")
 	bool CanAcceptPlayerInput() const;
 

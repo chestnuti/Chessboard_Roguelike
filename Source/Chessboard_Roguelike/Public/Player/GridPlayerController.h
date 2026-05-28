@@ -6,6 +6,7 @@
 
 class UInputAction;
 class UInputMappingContext;
+class UPlayerAttributeHUDWidget;
 
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API AGridPlayerController : public APlayerController
@@ -13,10 +14,13 @@ class CHESSBOARD_ROGUELIKE_API AGridPlayerController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	AGridPlayerController();
+
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
 
 protected:
+	// Mapping context and actions are assigned in Blueprint/Data assets so bindings stay data-driven.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputMappingContext> GridMovementMappingContext;
 
@@ -31,6 +35,13 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> MoveRightAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+	TSubclassOf<UPlayerAttributeHUDWidget> PlayerAttributeHUDClass;
+
+	// Runtime HUD instance owned by the local controller.
+	UPROPERTY(BlueprintReadOnly, Category = "UI")
+	TObjectPtr<UPlayerAttributeHUDWidget> PlayerAttributeHUD;
 
 private:
 	void MoveUp();
