@@ -66,6 +66,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Grid|Visual")
 	void RefreshTileInstanceVisual(const FIntPoint& Coord, ETileType NewTileType);
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Grid|Visual")
+	bool GetTileInstanceIndex(const FIntPoint& Coord, int32& OutInstanceIndex) const;
+
 	// Used by tile effects to avoid consuming obstacles or explicitly locked tiles.
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Grid")
 	bool IsTileConvertible(const FIntPoint& Coord) const;
@@ -88,6 +91,12 @@ public:
 	bool RequestMove(AActor* Unit, FIntPoint FromCoord, FIntPoint ToCoord);
 
 private:
+	void ApplyTileInstanceCustomData(const FIntPoint& Coord, ETileType NewTileType);
+
 	UPROPERTY(VisibleAnywhere, Category = "Grid")
 	TObjectPtr<USceneComponent> SceneRoot;
+
+	// Maps a grid coord to its instanced mesh index so one tile can be recolored without rebuilding the grid.
+	UPROPERTY(Transient)
+	TMap<FIntPoint, int32> TileInstanceIndices;
 };

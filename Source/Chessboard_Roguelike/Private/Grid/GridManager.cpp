@@ -7,6 +7,28 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridManager, Log, All);
 
+namespace
+{
+	constexpr int32 TileTypeCustomDataIndex = 0;
+	constexpr int32 TileTypeCustomDataFloatCount = 1;
+
+	float TileTypeToCustomDataValue(ETileType TileType)
+	{
+		switch (TileType)
+		{
+		case ETileType::Construct:
+			return 1.f;
+		case ETileType::Acid:
+			return 2.f;
+		case ETileType::Obstacle:
+			return 3.f;
+		case ETileType::Minimal:
+		default:
+			return 0.f;
+		}
+	}
+}
+
 AGridManager::AGridManager()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -17,6 +39,7 @@ AGridManager::AGridManager()
 	TileISM = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("TileISM"));
 	TileISM->SetupAttachment(SceneRoot);
 	TileISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TileISM->NumCustomDataFloats = TileTypeCustomDataFloatCount;
 }
 
 void AGridManager::OnConstruction(const FTransform& Transform)
@@ -30,7 +53,7 @@ void AGridManager::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (Tiles.IsEmpty())
+	if (Tiles.IsEmpty() || TileInstanceIndices.Num() != Tiles.Num())
 	{
 		GenerateGrid();
 	}
@@ -39,11 +62,13 @@ void AGridManager::BeginPlay()
 void AGridManager::GenerateGrid()
 {
 	Tiles.Empty();
+	TileInstanceIndices.Empty();
 
 	if (TileISM)
 	{
 		// Regeneration starts from a clean visual layer to match the rebuilt Tiles map.
 		TileISM->ClearInstances();
+		TileISM->NumCustomDataFloats = TileTypeCustomDataFloatCount;
 		if (GridSettings && GridSettings->TileMesh)
 		{
 			TileISM->SetStaticMesh(GridSettings->TileMesh);
@@ -109,7 +134,11 @@ void AGridManager::GenerateGrid()
 					InstanceScale.Y = GridSettings->TileSize / MeshSize.Y;
 				}
 
-				TileISM->AddInstance(FTransform(FRotator::ZeroRotator, GridToWorld(Coord), InstanceScale), true);
+				const int32 InstanceIndex = TileISM->AddInstance(FTransform(FRotator::ZeroRotator, GridToWorld(Coord), InstanceScale), true);
+				TileInstanceIndices.Add(Coord, InstanceIndex);
+
+				// Materials can read PerInstanceCustomData[0] to choose Minimal/Construct/Acid/Obstacle visuals.
+				ApplyTileInstanceCustomData(Coord, TileData.TileType);
 			}
 		}
 	}
@@ -163,6 +192,7 @@ bool AGridManager::SetTileType(const FIntPoint& Coord, ETileType NewTileType)
 
 	// Change only the terrain type; movement occupancy and walkability are managed by the grid movement layer.
 	TileData->TileType = NewTileType;
+	ApplyTileInstanceCustomData(Coord, NewTileType);
 	RefreshTileInstanceVisual(Coord, NewTileType);
 	OnTileTypeChanged.Broadcast(Coord, NewTileType);
 	return true;
@@ -170,7 +200,42 @@ bool AGridManager::SetTileType(const FIntPoint& Coord, ETileType NewTileType)
 
 void AGridManager::RefreshTileInstanceVisual_Implementation(const FIntPoint& Coord, ETileType NewTileType)
 {
-	// Blueprint GridManager variants can override this to recolor or swap one tile instance without rebuilding the grid.
+	// Blueprint GridManager variants can override this for extra effects; core custom data is applied before this hook.
+}
+
+void AGridManager::ApplyTileInstanceCustomData(const FIntPoint& Coord, ETileType NewTileType)
+{
+	if (!TileISM)
+	{
+		return;
+	}
+
+	const int32* InstanceIndex = TileInstanceIndices.Find(Coord);
+	if (!InstanceIndex)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("ApplyTileInstanceCustomData failed: coord (%d,%d) has no instance index."),
+			Coord.X, Coord.Y);
+		return;
+	}
+
+	const float CustomDataValue = TileTypeToCustomDataValue(NewTileType);
+	if (!TileISM->SetCustomDataValue(*InstanceIndex, TileTypeCustomDataIndex, CustomDataValue, true))
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("ApplyTileInstanceCustomData failed: InstanceIndex=%d CustomDataIndex=%d Value=%f NumCustomDataFloats=%d."),
+			*InstanceIndex, TileTypeCustomDataIndex, CustomDataValue, TileISM->NumCustomDataFloats);
+	}
+}
+
+bool AGridManager::GetTileInstanceIndex(const FIntPoint& Coord, int32& OutInstanceIndex) const
+{
+	if (const int32* InstanceIndex = TileInstanceIndices.Find(Coord))
+	{
+		OutInstanceIndex = *InstanceIndex;
+		return true;
+	}
+
+	OutInstanceIndex = INDEX_NONE;
+	return false;
 }
 
 bool AGridManager::IsTileConvertible(const FIntPoint& Coord) const
