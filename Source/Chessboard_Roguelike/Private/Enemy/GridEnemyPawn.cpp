@@ -4,6 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "Grid/GridManager.h"
+#include "Player/GridPawn.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridEnemyPawn, Log, All);
 
@@ -93,6 +94,93 @@ void AGridEnemyPawn::InitializeOnGrid(AGridManager* InGridManager, FIntPoint InS
 bool AGridEnemyPawn::CanReceiveDamage() const
 {
 	return !bDead;
+}
+
+bool AGridEnemyPawn::IsAlive() const
+{
+	return !bDead;
+}
+
+bool AGridEnemyPawn::CanAct() const
+{
+	return IsAlive() && GridManager != nullptr;
+}
+
+bool AGridEnemyPawn::TryMoveToGridCoord(FIntPoint TargetCoord)
+{
+	if (!CanAct())
+	{
+		return false;
+	}
+
+	if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
+	{
+		return false;
+	}
+
+	CurrentGridCoord = TargetCoord;
+	SetActorLocation(GridManager->GridToWorld(CurrentGridCoord));
+	return true;
+}
+
+bool AGridEnemyPawn::ExecuteBasicTurn_Implementation(AGridPawn* PlayerPawn)
+{
+	if (!CanAct() || !PlayerPawn)
+	{
+		return false;
+	}
+
+	const FIntPoint PlayerCoord = PlayerPawn->CurrentGridCoord;
+	const FIntPoint Delta = PlayerCoord - CurrentGridCoord;
+	const int32 ManhattanDistance = FMath::Abs(Delta.X) + FMath::Abs(Delta.Y);
+	if (ManhattanDistance == 1)
+	{
+		ExecuteMeleeAttack(PlayerPawn);
+		return true;
+	}
+
+	TArray<FIntPoint> CandidateDirections;
+	const FIntPoint HorizontalStep(FMath::Sign(Delta.X), 0);
+	const FIntPoint VerticalStep(0, FMath::Sign(Delta.Y));
+
+	if (FMath::Abs(Delta.X) >= FMath::Abs(Delta.Y))
+	{
+		if (Delta.X != 0)
+		{
+			CandidateDirections.Add(HorizontalStep);
+		}
+		if (Delta.Y != 0)
+		{
+			CandidateDirections.Add(VerticalStep);
+		}
+	}
+	else
+	{
+		if (Delta.Y != 0)
+		{
+			CandidateDirections.Add(VerticalStep);
+		}
+		if (Delta.X != 0)
+		{
+			CandidateDirections.Add(HorizontalStep);
+		}
+	}
+
+	for (const FIntPoint& Direction : CandidateDirections)
+	{
+		if (TryMoveToGridCoord(CurrentGridCoord + Direction))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void AGridEnemyPawn::ExecuteMeleeAttack_Implementation(AGridPawn* PlayerPawn)
+{
+	UE_LOG(LogGridEnemyPawn, Log, TEXT("%s attacks %s."),
+		*GetNameSafe(this), *GetNameSafe(PlayerPawn));
 }
 
 void AGridEnemyPawn::Kill()

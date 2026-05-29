@@ -6,6 +6,7 @@
 #include "GridEnemyPawn.generated.h"
 
 class AGridManager;
+class AGridPawn;
 class USceneComponent;
 class UStaticMeshComponent;
 
@@ -52,6 +53,21 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy")
 	bool CanReceiveDamage() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy")
+	bool IsAlive() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy")
+	bool CanAct() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	bool TryMoveToGridCoord(FIntPoint TargetCoord);
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Enemy")
+	bool ExecuteBasicTurn(AGridPawn* PlayerPawn);
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Enemy")
+	void ExecuteMeleeAttack(AGridPawn* PlayerPawn);
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void Kill();

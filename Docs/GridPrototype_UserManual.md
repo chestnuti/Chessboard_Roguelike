@@ -29,6 +29,7 @@
 专题说明：
 
 - `Docs/TileAttributeEffect_SystemGuide.md`: 地块属性变化、双属性值、HUD、地块材质刷新和蓝图接口说明。
+- `Docs/CombatAndEnemy_SystemGuide.md`: 近战攻击、敌人属性、免疫规则、单次阈值击杀和退回规则说明。
 
 ## 运行流程
 

@@ -34,5 +34,11 @@ public:
 	void EndPlayerAction();
 
 	UFUNCTION(BlueprintCallable, Category = "Turn")
+	void BeginEnemyTurn();
+
+	UFUNCTION(BlueprintCallable, Category = "Turn")
+	void EndEnemyTurn();
+
+	UFUNCTION(BlueprintCallable, Category = "Turn")
 	void AddStep();
 };

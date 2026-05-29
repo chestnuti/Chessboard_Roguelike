@@ -7,6 +7,7 @@
 #include "Core/TurnManager.h"
 #include "Core/TurnStateTypes.h"
 #include "EngineUtils.h"
+#include "Enemy/GridEnemyManager.h"
 #include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
 #include "Grid/TileEffectResolverComponent.h"
@@ -43,6 +44,7 @@ void AGridPawn::BeginPlay()
 
 	AGridManager* FoundGridManager = nullptr;
 	ATurnManager* FoundTurnManager = nullptr;
+	AGridEnemyManager* FoundEnemyManager = nullptr;
 
 	// Prototype convenience path: test maps can place managers without Blueprint wiring.
 	for (TActorIterator<AGridManager> It(GetWorld()); It; ++It)
@@ -54,6 +56,12 @@ void AGridPawn::BeginPlay()
 	for (TActorIterator<ATurnManager> It(GetWorld()); It; ++It)
 	{
 		FoundTurnManager = *It;
+		break;
+	}
+
+	for (TActorIterator<AGridEnemyManager> It(GetWorld()); It; ++It)
+	{
+		FoundEnemyManager = *It;
 		break;
 	}
 
@@ -69,6 +77,12 @@ void AGridPawn::BeginPlay()
 	}
 
 	InitializeOnGrid(FoundGridManager, FoundTurnManager, StartGridCoord);
+	if (FoundEnemyManager)
+	{
+		EnemyManager = FoundEnemyManager;
+		EnemyManager->InitializeEnemyManager(FoundGridManager, FoundTurnManager, this);
+	}
+
 	if (bInitializedOnGrid)
 	{
 		FoundTurnManager->SetTurnState(ETurnState::PlayerInput);
@@ -314,8 +328,42 @@ void AGridPawn::FinishVisualMove()
 	MoveElapsedTime = 0.f;
 	SetActorTickEnabled(false);
 
-	if (TurnManager)
+	ResolvePostPlayerActionTurn();
+}
+
+void AGridPawn::FindEnemyManagerIfNeeded()
+{
+	if (EnemyManager || !GetWorld())
+	{
+		return;
+	}
+
+	for (TActorIterator<AGridEnemyManager> It(GetWorld()); It; ++It)
+	{
+		EnemyManager = *It;
+		if (EnemyManager)
+		{
+			EnemyManager->InitializeEnemyManager(GridManager, TurnManager, this);
+		}
+		break;
+	}
+}
+
+void AGridPawn::ResolvePostPlayerActionTurn()
+{
+	if (!TurnManager)
+	{
+		return;
+	}
+
+	FindEnemyManagerIfNeeded();
+	if (!EnemyManager)
 	{
 		TurnManager->EndPlayerAction();
+		return;
 	}
+
+	TurnManager->BeginEnemyTurn();
+	EnemyManager->ExecuteEnemyTurn();
+	TurnManager->EndEnemyTurn();
 }

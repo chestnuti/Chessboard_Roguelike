@@ -7,6 +7,7 @@
 class AGridManager;
 class ATurnManager;
 class AGridEnemyPawn;
+class AGridEnemyManager;
 class UCombatResolverComponent;
 class UStaticMeshComponent;
 class USceneComponent;
@@ -63,6 +64,9 @@ public:
 	UPROPERTY()
 	TObjectPtr<ATurnManager> TurnManager;
 
+	UPROPERTY()
+	TObjectPtr<AGridEnemyManager> EnemyManager;
+
 	UFUNCTION(BlueprintCallable, Category = "Grid")
 	void InitializeOnGrid(AGridManager* InGridManager, ATurnManager* InTurnManager, FIntPoint InStartCoord);
 
@@ -87,4 +91,6 @@ private:
 
 	void ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor);
 	void StartFailedAttackVisualMove(const FVector& From, const FVector& BlockedTarget);
+	void FindEnemyManagerIfNeeded();
+	void ResolvePostPlayerActionTurn();
 };

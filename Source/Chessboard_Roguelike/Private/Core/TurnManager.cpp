@@ -36,6 +36,16 @@ void ATurnManager::EndPlayerAction()
 	SetTurnState(ETurnState::PlayerInput);
 }
 
+void ATurnManager::BeginEnemyTurn()
+{
+	SetTurnState(ETurnState::EnemyTurnResolve);
+}
+
+void ATurnManager::EndEnemyTurn()
+{
+	SetTurnState(ETurnState::PlayerInput);
+}
+
 void ATurnManager::AddStep()
 {
 	++StepCount;
