@@ -1,0 +1,40 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "CombatTypes.generated.h"
+
+USTRUCT(BlueprintType)
+struct CHESSBOARD_ROGUELIKE_API FCombatDamage
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	int32 ConstructDamage = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	int32 AcidDamage = 0;
+};
+
+USTRUCT(BlueprintType)
+struct CHESSBOARD_ROGUELIKE_API FCombatResolveResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bKilled = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bImmuneConstruct = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bImmuneAcid = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	int32 EffectiveConstructDamage = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	int32 EffectiveAcidDamage = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	int32 KillThreshold = 0;
+};

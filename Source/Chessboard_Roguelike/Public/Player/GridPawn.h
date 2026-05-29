@@ -6,6 +6,8 @@
 
 class AGridManager;
 class ATurnManager;
+class AGridEnemyPawn;
+class UCombatResolverComponent;
 class UStaticMeshComponent;
 class USceneComponent;
 class UPlayerAttributeComponent;
@@ -32,6 +34,10 @@ public:
 	// Resolves optional tile-enter effects after GridManager confirms movement.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UTileEffectResolverComponent> TileEffectResolverComponent;
+
+	// Resolves melee attacks without owning grid occupancy changes.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UCombatResolverComponent> CombatResolverComponent;
 
 	// Authoritative logical position for movement and validation.
 	UPROPERTY(BlueprintReadOnly, Category = "Grid")
@@ -74,6 +80,11 @@ private:
 
 	FVector VisualMoveFrom = FVector::ZeroVector;
 	FVector VisualMoveTo = FVector::ZeroVector;
+	FVector FailedAttackVisualPeak = FVector::ZeroVector;
 	float MoveElapsedTime = 0.f;
+	bool bIsFailedAttackVisualMove = false;
 	bool bInitializedOnGrid = false;
+
+	void ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor);
+	void StartFailedAttackVisualMove(const FVector& From, const FVector& BlockedTarget);
 };

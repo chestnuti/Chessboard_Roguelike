@@ -1,10 +1,13 @@
 #include "Player/GridPawn.h"
 
+#include "Combat/CombatResolverComponent.h"
+#include "Combat/CombatTypes.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/TurnManager.h"
 #include "Core/TurnStateTypes.h"
 #include "EngineUtils.h"
+#include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
 #include "Grid/TileEffectResolverComponent.h"
 #include "Player/PlayerAttributeComponent.h"
@@ -26,6 +29,7 @@ AGridPawn::AGridPawn()
 
 	PlayerAttributeComponent = CreateDefaultSubobject<UPlayerAttributeComponent>(TEXT("PlayerAttributeComponent"));
 	TileEffectResolverComponent = CreateDefaultSubobject<UTileEffectResolverComponent>(TEXT("TileEffectResolverComponent"));
+	CombatResolverComponent = CreateDefaultSubobject<UCombatResolverComponent>(TEXT("CombatResolverComponent"));
 }
 
 void AGridPawn::BeginPlay()
@@ -90,7 +94,17 @@ void AGridPawn::Tick(float DeltaSeconds)
 	// Tick is used only for presentation interpolation, not for reading input or deciding moves.
 	MoveElapsedTime += DeltaSeconds;
 	const float Alpha = FMath::Clamp(MoveElapsedTime / MoveDuration, 0.f, 1.f);
-	SetActorLocation(FMath::Lerp(VisualMoveFrom, VisualMoveTo, Alpha));
+	if (bIsFailedAttackVisualMove)
+	{
+		const float ReboundAlpha = Alpha < 0.5f ? Alpha * 2.f : (Alpha - 0.5f) * 2.f;
+		const FVector ReboundFrom = Alpha < 0.5f ? VisualMoveFrom : FailedAttackVisualPeak;
+		const FVector ReboundTo = Alpha < 0.5f ? FailedAttackVisualPeak : VisualMoveTo;
+		SetActorLocation(FMath::Lerp(ReboundFrom, ReboundTo, ReboundAlpha));
+	}
+	else
+	{
+		SetActorLocation(FMath::Lerp(VisualMoveFrom, VisualMoveTo, Alpha));
+	}
 
 	if (Alpha >= 1.f)
 	{
@@ -167,9 +181,35 @@ void AGridPawn::TryMove(FIntPoint Direction)
 	}
 
 	const FIntPoint TargetCoord = CurrentGridCoord + Direction;
-	if (!GridManager->IsValidCoord(TargetCoord) || !GridManager->IsWalkable(TargetCoord) || GridManager->IsOccupied(TargetCoord))
+	if (!GridManager->IsValidCoord(TargetCoord) || !GridManager->IsWalkable(TargetCoord))
 	{
 		// Illegal movement is intentionally silent and does not consume a step.
+		return;
+	}
+
+	FTileData TargetTileData;
+	if (!GridManager->GetTileData(TargetCoord, TargetTileData))
+	{
+		return;
+	}
+
+	if (TargetTileData.OccupantType == EGridOccupantType::Enemy)
+	{
+		AGridEnemyPawn* EnemyActor = Cast<AGridEnemyPawn>(TargetTileData.OccupantActor.Get());
+		if (!EnemyActor)
+		{
+			UE_LOG(LogGridPawn, Warning, TEXT("TryMove found enemy occupancy at (%d,%d), but OccupantActor is not AGridEnemyPawn."),
+				TargetCoord.X, TargetCoord.Y);
+			return;
+		}
+
+		ResolveEnemyMeleeAttack(TargetCoord, EnemyActor);
+		return;
+	}
+
+	if (TargetTileData.OccupantType != EGridOccupantType::Empty)
+	{
+		// Obstacles or unknown occupants are blocked without consuming a step.
 		return;
 	}
 
@@ -195,11 +235,71 @@ void AGridPawn::TryMove(FIntPoint Direction)
 	StartVisualMove(FromLocation, ToLocation);
 }
 
+void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor)
+{
+	if (!GridManager || !TurnManager || !EnemyActor)
+	{
+		return;
+	}
+
+	const FVector FromLocation = GetActorLocation();
+	const FVector TargetLocation = GridManager->GridToWorld(TargetCoord);
+
+	TurnManager->BeginPlayerAction();
+
+	const FCombatResolveResult CombatResult = CombatResolverComponent
+		? CombatResolverComponent->ResolvePlayerMeleeAttack(this, EnemyActor)
+		: FCombatResolveResult();
+
+	if (CombatResult.bKilled)
+	{
+		EnemyActor->Kill();
+		GridManager->ClearOccupant(TargetCoord);
+
+		if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
+		{
+			UE_LOG(LogGridPawn, Warning, TEXT("ResolveEnemyMeleeAttack killed enemy but failed to move player into (%d,%d)."),
+				TargetCoord.X, TargetCoord.Y);
+			TurnManager->EndPlayerAction();
+			return;
+		}
+
+		CurrentGridCoord = TargetCoord;
+		if (TileEffectResolverComponent)
+		{
+			// A successful kill leaves the player occupying the target tile, so normal tile-enter effects apply.
+			TileEffectResolverComponent->ResolveTileEnterEffect(this, CurrentGridCoord);
+		}
+
+		TurnManager->AddStep();
+		StartVisualMove(FromLocation, TargetLocation);
+		return;
+	}
+
+	// Failed attacks still spend the player's step but leave occupancy and tile effects unchanged.
+	TurnManager->AddStep();
+	StartFailedAttackVisualMove(FromLocation, TargetLocation);
+}
+
 void AGridPawn::StartVisualMove(const FVector& From, const FVector& To)
 {
 	VisualMoveFrom = From;
 	VisualMoveTo = To;
+	FailedAttackVisualPeak = To;
 	MoveElapsedTime = 0.f;
+	bIsFailedAttackVisualMove = false;
+	bIsMoving = true;
+	SetActorLocation(VisualMoveFrom);
+	SetActorTickEnabled(true);
+}
+
+void AGridPawn::StartFailedAttackVisualMove(const FVector& From, const FVector& BlockedTarget)
+{
+	VisualMoveFrom = From;
+	VisualMoveTo = From;
+	FailedAttackVisualPeak = FMath::Lerp(From, BlockedTarget, 0.35f);
+	MoveElapsedTime = 0.f;
+	bIsFailedAttackVisualMove = true;
 	bIsMoving = true;
 	SetActorLocation(VisualMoveFrom);
 	SetActorTickEnabled(true);
@@ -210,6 +310,7 @@ void AGridPawn::FinishVisualMove()
 	// Snap at the end to prevent small interpolation drift from desyncing visuals and grid state.
 	SetActorLocation(VisualMoveTo);
 	bIsMoving = false;
+	bIsFailedAttackVisualMove = false;
 	MoveElapsedTime = 0.f;
 	SetActorTickEnabled(false);
 
