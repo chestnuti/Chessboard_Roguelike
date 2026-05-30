@@ -70,3 +70,26 @@ bool UPlayerAttributeComponent::IsAcidValueMaxed() const
 {
 	return AcidValue >= MaxAcidValue;
 }
+
+bool UPlayerAttributeComponent::IsConstructSuppressionActive() const
+{
+	return IsConstructValueMaxed();
+}
+
+bool UPlayerAttributeComponent::IsAcidSuppressionActive() const
+{
+	return IsAcidValueMaxed();
+}
+
+bool UPlayerAttributeComponent::CanSuppressFaction(EEnemyFaction EnemyFaction) const
+{
+	switch (EnemyFaction)
+	{
+	case EEnemyFaction::Construct:
+		return IsConstructSuppressionActive();
+	case EEnemyFaction::Acid:
+		return IsAcidSuppressionActive();
+	default:
+		return false;
+	}
+}

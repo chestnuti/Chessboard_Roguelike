@@ -60,11 +60,17 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy")
 	bool CanAct() const;
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy|Suppression")
+	bool IsSuppressedByPlayer(const AGridPawn* PlayerPawn) const;
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	bool TryMoveToGridCoord(FIntPoint TargetCoord);
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Enemy")
 	bool ExecuteBasicTurn(AGridPawn* PlayerPawn);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Suppression")
+	void OnSuppressedByPlayer(AGridPawn* PlayerPawn);
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Enemy")
 	void ExecuteMeleeAttack(AGridPawn* PlayerPawn);

@@ -5,6 +5,7 @@
 #include "EngineUtils.h"
 #include "Grid/GridManager.h"
 #include "Player/GridPawn.h"
+#include "Player/PlayerAttributeComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridEnemyPawn, Log, All);
 
@@ -106,6 +107,22 @@ bool AGridEnemyPawn::CanAct() const
 	return IsAlive() && GridManager != nullptr;
 }
 
+bool AGridEnemyPawn::IsSuppressedByPlayer(const AGridPawn* PlayerPawn) const
+{
+	if (!PlayerPawn)
+	{
+		return false;
+	}
+
+	const UPlayerAttributeComponent* AttributeComponent = PlayerPawn->PlayerAttributeComponent;
+	if (!AttributeComponent)
+	{
+		AttributeComponent = PlayerPawn->FindComponentByClass<UPlayerAttributeComponent>();
+	}
+
+	return AttributeComponent && AttributeComponent->CanSuppressFaction(Faction);
+}
+
 bool AGridEnemyPawn::TryMoveToGridCoord(FIntPoint TargetCoord)
 {
 	if (!CanAct())
@@ -127,6 +144,12 @@ bool AGridEnemyPawn::ExecuteBasicTurn_Implementation(AGridPawn* PlayerPawn)
 {
 	if (!CanAct() || !PlayerPawn)
 	{
+		return false;
+	}
+
+	if (IsSuppressedByPlayer(PlayerPawn))
+	{
+		OnSuppressedByPlayer(PlayerPawn);
 		return false;
 	}
 

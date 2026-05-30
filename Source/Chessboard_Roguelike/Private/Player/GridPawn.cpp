@@ -15,6 +15,22 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridPawn, Log, All);
 
+namespace
+{
+	ETileType GetDroppedEnergyTypeForFaction(EEnemyFaction Faction)
+	{
+		switch (Faction)
+		{
+		case EEnemyFaction::Construct:
+			return ETileType::Construct;
+		case EEnemyFaction::Acid:
+			return ETileType::Acid;
+		default:
+			return ETileType::Minimal;
+		}
+	}
+}
+
 AGridPawn::AGridPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -267,6 +283,8 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 
 	if (CombatResult.bKilled)
 	{
+		const ETileType DroppedEnergyType = GetDroppedEnergyTypeForFaction(EnemyActor->Faction);
+
 		EnemyActor->Kill();
 		GridManager->ClearOccupant(TargetCoord);
 
@@ -284,6 +302,8 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 			// A successful kill leaves the player occupying the target tile, so normal tile-enter effects apply.
 			TileEffectResolverComponent->ResolveTileEnterEffect(this, CurrentGridCoord);
 		}
+
+		OnPlayerKilledEnemy(EnemyActor, DroppedEnergyType);
 
 		TurnManager->AddStep();
 		StartVisualMove(FromLocation, TargetLocation);
@@ -366,4 +386,33 @@ void AGridPawn::ResolvePostPlayerActionTurn()
 	TurnManager->BeginEnemyTurn();
 	EnemyManager->ExecuteEnemyTurn();
 	TurnManager->EndEnemyTurn();
+}
+
+bool AGridPawn::ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType)
+{
+	if (!InGridManager)
+	{
+		return false;
+	}
+	const TArray<FIntPoint> AdjacentCoords = {
+		CurrentGridCoord,
+		CurrentGridCoord + FIntPoint(1, 0),
+		CurrentGridCoord + FIntPoint(-1, 0),
+		CurrentGridCoord + FIntPoint(0, 1),
+		CurrentGridCoord + FIntPoint(0, -1),
+		CurrentGridCoord + FIntPoint(1, 1),
+		CurrentGridCoord + FIntPoint(1, -1),
+		CurrentGridCoord + FIntPoint(-1, 1),
+		CurrentGridCoord + FIntPoint(-1, -1)
+	};
+	bool bConvertedAny = false;
+	for (const FIntPoint& Coord : AdjacentCoords)
+	{
+		if (InGridManager->IsTileConvertible(Coord))
+		{
+			InGridManager->SetTileType(Coord, EnergyType);
+			bConvertedAny = true;
+		}
+	}
+	return bConvertedAny;
 }

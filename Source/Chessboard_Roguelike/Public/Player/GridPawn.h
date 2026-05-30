@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "Grid/GridTypes.h"
 #include "GridPawn.generated.h"
 
 class AGridManager;
@@ -73,6 +74,14 @@ public:
 	// Direction must be exactly one cardinal grid step.
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	void TryMove(FIntPoint Direction);
+
+	// Blueprint owns prototype energy storage; C++ only exposes the authoritative kill result.
+	UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
+	void OnPlayerKilledEnemy(AGridEnemyPawn* KilledEnemy, ETileType DroppedEnergyType);
+
+	// Convert area to selected type around play
+	UFUNCTION(BlueprintCallable, category = "Grid")
+	bool ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType);
 
 	// Visual-only movement; grid occupancy has already been updated before this starts.
 	void StartVisualMove(const FVector& From, const FVector& To);

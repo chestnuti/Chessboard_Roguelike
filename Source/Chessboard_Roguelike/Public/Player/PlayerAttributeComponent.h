@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Enemy/EnemyTypes.h"
 #include "PlayerAttributeComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
@@ -54,6 +55,15 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Player Attributes")
 	bool IsAcidValueMaxed() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Player Attributes|Suppression")
+	bool IsConstructSuppressionActive() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Player Attributes|Suppression")
+	bool IsAcidSuppressionActive() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Player Attributes|Suppression")
+	bool CanSuppressFaction(EEnemyFaction EnemyFaction) const;
 
 	UPROPERTY(BlueprintAssignable, Category = "Player Attributes|Events")
 	FOnPlayerAttributeChanged OnPlayerAttributeChanged;
