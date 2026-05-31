@@ -29,6 +29,12 @@ protected:
 
 	// Optional bindings match the Widget Blueprint names; native fallback widgets are created if they are absent.
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Player Attributes")
+	TObjectPtr<UTextBlock> HealthText;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Player Attributes")
+	TObjectPtr<UProgressBar> HealthProgressBar;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Player Attributes")
 	TObjectPtr<UTextBlock> ConstructText;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Player Attributes")
@@ -46,6 +52,9 @@ private:
 
 	UFUNCTION()
 	void HandlePlayerAttributeChanged(int32 NewConstructValue, int32 NewAcidValue);
+
+	UFUNCTION()
+	void HandlePlayerHealthChanged(int32 NewHealth, int32 MaxHealth);
 
 	void BuildFallbackWidgetTreeIfNeeded();
 	void BindToAttributeComponent(UPlayerAttributeComponent* InAttributeComponent);

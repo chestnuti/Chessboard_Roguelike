@@ -385,7 +385,10 @@ void AGridPawn::ResolvePostPlayerActionTurn()
 
 	TurnManager->BeginEnemyTurn();
 	EnemyManager->ExecuteEnemyTurn();
-	TurnManager->EndEnemyTurn();
+	if (!EnemyManager->ShouldDelayEnemyTurnEnd())
+	{
+		TurnManager->EndEnemyTurn();
+	}
 }
 
 bool AGridPawn::ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType)

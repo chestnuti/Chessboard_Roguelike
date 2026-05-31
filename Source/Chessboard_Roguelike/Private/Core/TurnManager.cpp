@@ -32,6 +32,11 @@ void ATurnManager::BeginPlayerAction()
 
 void ATurnManager::EndPlayerAction()
 {
+	if (CurrentTurnState == ETurnState::Victory || CurrentTurnState == ETurnState::Defeat)
+	{
+		return;
+	}
+
 	// Return control only after the current action has fully resolved.
 	SetTurnState(ETurnState::PlayerInput);
 }
@@ -43,6 +48,11 @@ void ATurnManager::BeginEnemyTurn()
 
 void ATurnManager::EndEnemyTurn()
 {
+	if (CurrentTurnState == ETurnState::Victory || CurrentTurnState == ETurnState::Defeat)
+	{
+		return;
+	}
+
 	SetTurnState(ETurnState::PlayerInput);
 }
 

@@ -1,6 +1,7 @@
 #include "Combat/CombatResolverComponent.h"
 
 #include "Enemy/GridEnemyPawn.h"
+#include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCombatResolver, Log, All);
@@ -56,5 +57,76 @@ FCombatResolveResult UCombatResolverComponent::ResolvePlayerMeleeAttack(const AA
 
 	const int32 EffectiveSingleHitDamage = FMath::Max(Result.EffectiveConstructDamage, Result.EffectiveAcidDamage);
 	Result.bKilled = EffectiveSingleHitDamage >= Result.KillThreshold;
+	return Result;
+}
+
+FEnemyAttackDamage UCombatResolverComponent::BuildEnemyMeleeDamage(const AGridEnemyPawn* EnemyActor) const
+{
+	FEnemyAttackDamage Damage;
+	if (!EnemyActor || !EnemyActor->IsAlive())
+	{
+		UE_LOG(LogCombatResolver, Warning, TEXT("BuildEnemyMeleeDamage failed: EnemyActor is null or dead."));
+		return Damage;
+	}
+
+	Damage.HealthDamage = FMath::Max(0, EnemyActor->AttackDamage);
+
+	if (EnemyActor->bApplyFactionAttributeDamage && EnemyActor->AttackAttributeDamage > 0)
+	{
+		switch (EnemyActor->Faction)
+		{
+		case EEnemyFaction::Construct:
+			Damage.ConstructDelta = -EnemyActor->AttackAttributeDamage;
+			break;
+		case EEnemyFaction::Acid:
+			Damage.AcidDelta = -EnemyActor->AttackAttributeDamage;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return Damage;
+}
+
+FEnemyAttackResolveResult UCombatResolverComponent::ResolveEnemyMeleeAttack(
+	const AGridEnemyPawn* EnemyActor,
+	AGridPawn* PlayerPawn) const
+{
+	FEnemyAttackResolveResult Result;
+	if (!EnemyActor || !PlayerPawn)
+	{
+		UE_LOG(LogCombatResolver, Warning, TEXT("ResolveEnemyMeleeAttack failed: EnemyActor or PlayerPawn is null."));
+		return Result;
+	}
+
+	UPlayerAttributeComponent* AttributeComponent = PlayerPawn->PlayerAttributeComponent;
+	if (!AttributeComponent)
+	{
+		AttributeComponent = PlayerPawn->FindComponentByClass<UPlayerAttributeComponent>();
+	}
+
+	if (!AttributeComponent || AttributeComponent->IsDefeated())
+	{
+		return Result;
+	}
+
+	const FEnemyAttackDamage Damage = BuildEnemyMeleeDamage(EnemyActor);
+	if (Damage.ConstructDelta != 0 || Damage.AcidDelta != 0)
+	{
+		AttributeComponent->ApplyTileAttributeDelta(Damage.ConstructDelta, Damage.AcidDelta);
+		Result.AppliedConstructDelta = Damage.ConstructDelta;
+		Result.AppliedAcidDelta = Damage.AcidDelta;
+	}
+
+	if (Damage.HealthDamage > 0)
+	{
+		AttributeComponent->ApplyHealthDamage(Damage.HealthDamage);
+		Result.AppliedHealthDamage = Damage.HealthDamage;
+	}
+
+	Result.RemainingHealth = AttributeComponent->GetCurrentHealth();
+	Result.bPlayerDefeated = AttributeComponent->IsDefeated();
+	Result.bDamageApplied = Result.AppliedHealthDamage > 0 || Result.AppliedConstructDelta != 0 || Result.AppliedAcidDelta != 0;
 	return Result;
 }

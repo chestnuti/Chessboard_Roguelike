@@ -12,9 +12,11 @@
 2. 玩家视觉移动结束后，`AGridPawn` 调用 `ATurnManager::BeginEnemyTurn()`。
 3. `AGridEnemyManager::ExecuteEnemyTurn()` 遍历存活敌人。
 4. 每个敌人调用 `AGridEnemyPawn::ExecuteBasicTurn()`。该函数是 `BlueprintNativeEvent`，可由敌人蓝图覆写。
-5. 敌人若与玩家相邻，触发 `ExecuteMeleeAttack()`。
-6. 敌人若不相邻，尝试沿曼哈顿距离靠近玩家一格。
-7. 敌方回合结束后，`ATurnManager::EndEnemyTurn()` 回到 `PlayerInput`。
+5. 敌人若与玩家相邻，默认先结算近战伤害，再触发 `ExecuteMeleeAttack()` 供蓝图播放表现。
+6. 敌人若不相邻，尝试沿曼哈顿距离靠近玩家一格；移动成功时立即更新逻辑占格，并播放短距离视觉插值。
+7. 若存在敌人正在播放移动插值，`AGridEnemyManager` 会保持 `EnemyTurnResolve`，等所有敌人移动完成后再结束敌方回合。
+8. 若玩家 HP 在敌方回合中降至 `0`，`ATurnManager` 进入 `Defeat`，敌人管理器停止后续敌人行动。
+9. 如果玩家未失败，敌方回合结束后，`ATurnManager::EndEnemyTurn()` 回到 `PlayerInput`。
 
 ## 类职责
 
@@ -51,7 +53,10 @@ Source/Chessboard_Roguelike/Private/Enemy/GridEnemyManager.cpp
 | `CanAct()` | 当前要求敌人存活且拥有 `GridManager` |
 | `TryMoveToGridCoord()` | 通过 `AGridManager::RequestMove()` 尝试移动到指定格子 |
 | `ExecuteBasicTurn()` | 蓝图可覆写事件。C++ 默认实现为：相邻则攻击，否则靠近玩家一格 |
-| `ExecuteMeleeAttack()` | 蓝图可覆写事件，当前 C++ 默认只写日志 |
+| `ExecuteMeleeAttack()` | 蓝图可覆写事件。默认实现会结算敌人近战伤害并写日志 |
+| `ApplyMeleeAttackDamage()` | 蓝图可调用函数。对玩家应用敌人近战伤害，返回 `FEnemyAttackResolveResult` |
+| `OnMeleeAttackResolved()` | 蓝图可实现事件。敌人近战伤害结算后触发，用于表现和提示 |
+| `ShouldDelayEnemyTurnEnd()` | 返回是否需要等待敌人移动视觉插值完成后再结束敌方回合 |
 
 ## 蓝图覆写敌人 AI
 
@@ -82,7 +87,9 @@ Source/Chessboard_Roguelike/Private/Enemy/GridEnemyManager.cpp
 - 不要在蓝图中直接修改 `AGridManager::Tiles`。
 - 敌人移动应优先通过 `TryMoveToGridCoord()`，让 `AGridManager::RequestMove()` 负责合法性和占据状态。
 - 如果蓝图自行修改 `CurrentGridCoord` 或 Actor 位置，可能导致视觉位置和格子占据不同步。
-- 如果需要攻击玩家的真实数值效果，建议放在 `ExecuteMeleeAttack()` 或后续独立 Resolver 中，不建议写进 `AGridEnemyManager`。
+- 如果只覆写 `ExecuteMeleeAttack()`，并继续使用 C++ 默认 `ExecuteBasicTurn()`，伤害仍会在事件触发前结算。
+- 如果覆写 `ExecuteBasicTurn()` 并完全不调用 Parent，相邻攻击时需要显式调用 `ApplyMeleeAttackDamage()` 或调用 Parent `Execute Basic Turn`，否则不会修改玩家 HP。
+- 不建议在 `AGridEnemyManager` 中写具体伤害规则；管理器只负责调度和失败中断，伤害仍由 `AGridEnemyPawn` 与 `UCombatResolverComponent` 处理。
 
 ## 关卡使用方式
 
@@ -98,19 +105,30 @@ Source/Chessboard_Roguelike/Private/Enemy/GridEnemyManager.cpp
 未覆写 `ExecuteBasicTurn()` 时，C++ 默认基础敌人行动规则：
 
 - 与玩家曼哈顿距离为 `1` 时，触发近战攻击事件。
+- 相邻攻击会对玩家造成 `AttackDamage` 点 HP 伤害；默认值为 `1`。
+- 若敌人启用 `bApplyFactionAttributeDamage`，`Construct` 敌人会扣玩家构成值，`Acid` 敌人会扣玩家酸性值。
+- 玩家 HP 降至 `0` 时，本轮敌方回合立即中断并进入 `Defeat`。
 - 不相邻时，优先沿绝对距离更大的轴靠近玩家。
 - 如果优先方向被阻挡，尝试另一个轴。
 - 如果两个方向都失败，敌人跳过行动。
 - 移动不使用 NavMesh，只使用 `AGridManager::RequestMove()`。
-
-当前近战攻击只提供 `ExecuteMeleeAttack()` 事件入口，尚未对玩家造成实际效果。
+- 成功移动后，敌人 Actor 会从旧格中心插值到新格中心，默认时长为 `MoveDuration = 0.15`。
+- 移动插值期间，敌人管理器延迟调用 `ATurnManager::EndEnemyTurn()`，防止玩家在敌人视觉移动未完成时输入。
 
 ## 边界与后续扩展
 
+当前已实现：
+
+- 敌方回合统一遍历存活敌人。
+- 默认基础 AI 相邻攻击、非相邻靠近玩家。
+- 敌人移动视觉插值，以及移动完成前的敌方回合锁定。
+- 敌人近战对玩家造成 HP 伤害。
+- 敌人近战可按阵营扣减玩家构成值或酸性值。
+- 玩家失败时进入 `Defeat` 并停止后续敌人行动。
+
 当前未实现：
 
-- 敌人攻击玩家的实际伤害或压制。
-- 敌人行动动画队列。
+- 敌人逐个行动动画队列；当前移动插值是并行播放。
 - 远程敌人瞄准和攻击线。
 - 房间激活和跨房间追逐。
 - 友伤和跨阵营清除链。
@@ -137,9 +155,11 @@ Source/Chessboard_Roguelike/Private/Enemy/GridEnemyManager.cpp
 
 敌人攻击没有效果时检查：
 
-1. 当前 C++ 默认攻击只输出日志。
-2. 如需表现或数值效果，可在敌人蓝图中覆写 `ExecuteMeleeAttack()`。
-3. 后续压制/伤害系统应通过独立 Resolver 或玩家组件处理，不建议直接写进 `AGridEnemyManager`。
+1. 玩家 Pawn 是否存在 `PlayerAttributeComponent` 和 `CombatResolverComponent`。
+2. 敌人是否被压制；被压制时默认 AI 不会攻击。
+3. 敌人 `AttackDamage` 是否大于 `0`。
+4. 如果覆写了 `ExecuteBasicTurn()`，是否调用了 Parent 或显式调用 `ApplyMeleeAttackDamage()`。
+5. 如果只覆写 `ExecuteMeleeAttack()`，确认关卡里的敌人仍然走默认 `ExecuteBasicTurn()`，或者覆写逻辑自行处理伤害。
 
 蓝图 AI 没有生效时检查：
 

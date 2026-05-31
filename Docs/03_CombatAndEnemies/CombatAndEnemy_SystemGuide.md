@@ -1,6 +1,6 @@
 # 近战攻击与敌人阈值击杀系统说明
 
-本文档说明任务 5、6 功能的实现方式、可在蓝图中调用或修改的事件、值、参数，以及当前战斗系统与网格、地块属性系统之间的边界。该系统只处理玩家主动向敌人格移动时触发的近战攻击、敌人免疫、单次阈值击杀和未击杀退回。敌方回合调度和基础 AI 已拆分到 `AGridEnemyManager`，详见 [EnemyManager_SystemGuide.md](EnemyManager_SystemGuide.md)。本文不包含压制状态、友伤、地块转换能量、远程攻击、PCG 或多房间逻辑。
+本文档说明任务 5、6、7 中与战斗结算相关功能的实现方式、可在蓝图中调用或修改的事件、值、参数，以及当前战斗系统与网格、地块属性系统之间的边界。该系统处理玩家主动向敌人格移动时触发的近战攻击、敌人免疫、单次阈值击杀、未击杀退回，以及敌人在敌方回合中对玩家造成的基础近战伤害。敌方回合调度和基础 AI 已拆分到 `AGridEnemyManager`，详见 [EnemyManager_SystemGuide.md](EnemyManager_SystemGuide.md)。本文不包含友伤、地块转换能量、远程攻击、PCG 或多房间逻辑。
 
 ## 功能流程
 
@@ -18,6 +18,16 @@
 10. 近战攻击无论是否击杀，都会调用 `ATurnManager::AddStep()` 消耗 1 步。
 
 非法移动、撞墙、越界、障碍格、目标格不是敌人且非空，都不会触发攻击，也不会消耗步数。
+
+敌人对玩家造成伤害的流程如下：
+
+1. 玩家完成一次合法行动后，`AGridPawn::ResolvePostPlayerActionTurn()` 进入敌方回合。
+2. `AGridEnemyManager::ExecuteEnemyTurn()` 遍历当前存活敌人。
+3. 默认 `AGridEnemyPawn::ExecuteBasicTurn()` 判断敌人与玩家是否相邻。
+4. 若相邻且未被压制，敌人先调用 `ApplyMeleeAttackDamage()` 完成数值结算，再触发 `ExecuteMeleeAttack()` 供蓝图播放表现。
+5. `ApplyMeleeAttackDamage()` 通过玩家 Pawn 上的 `UCombatResolverComponent::ResolveEnemyMeleeAttack()` 修改 `UPlayerAttributeComponent`。
+6. 默认近战造成 `AttackDamage` 点 HP 伤害，并可按敌人阵营额外扣减玩家对应属性值。
+7. 如果玩家 HP 降至 `0`，`AGridEnemyManager` 将 `ATurnManager` 状态设为 `Defeat`，并停止后续敌人行动。
 
 ## 攻击与退回规则
 
@@ -84,6 +94,10 @@
 | `Faction` | `EEnemyFaction` | `Construct` | 敌人阵营，决定免疫哪一种玩家伤害 |
 | `BehaviorType` | `EEnemyBehaviorType` | `Melee` | 敌人行为类型，当前仅预留 |
 | `KillThreshold` | `int32` | `5` | 单次击杀阈值，不是累计 HP |
+| `AttackDamage` | `int32` | `1` | 敌人近战命中玩家时造成的 HP 伤害 |
+| `AttackAttributeDamage` | `int32` | `1` | 启用阵营属性伤害时，对玩家对应属性值造成的扣减量 |
+| `bApplyFactionAttributeDamage` | `bool` | `true` | 是否让 `Construct` 敌人扣构成值、`Acid` 敌人扣酸性值 |
+| `MoveDuration` | `float` | `0.15` | 敌人移动视觉插值时长；逻辑占格仍在移动成功时立即更新 |
 | `StartGridCoord` | `FIntPoint` | `(1, 0)` | 自动初始化时占据的格子 |
 | `bAutoInitializeOnBeginPlay` | `bool` | `true` | 是否在 BeginPlay 自动查找 GridManager 并占格 |
 
@@ -95,6 +109,7 @@
 | --- | --- | --- |
 | `CurrentGridCoord` | `FIntPoint` | 当前逻辑坐标 |
 | `bDead` | `bool` | 是否已死亡 |
+| `bIsMoving` | `bool` | 是否正在播放移动视觉插值 |
 | `GridManager` | `AGridManager*` | 当前使用的棋盘管理器 |
 
 ### 蓝图可调用函数
@@ -105,9 +120,11 @@
 | `CanReceiveDamage` | 无 | `bool` | 返回敌人是否仍可受击，当前等价于 `!bDead` |
 | `IsAlive` | 无 | `bool` | 返回敌人是否存活，当前等价于 `!bDead` |
 | `CanAct` | 无 | `bool` | 返回敌人是否可行动，当前要求存活且拥有 `GridManager` |
-| `TryMoveToGridCoord` | `TargetCoord` | `bool` | 通过 `AGridManager::RequestMove()` 尝试移动到目标格 |
+| `TryMoveToGridCoord` | `TargetCoord` | `bool` | 通过 `AGridManager::RequestMove()` 尝试移动到目标格；成功后更新逻辑坐标并播放视觉插值 |
 | `ExecuteBasicTurn` | `PlayerPawn` | `bool` | `BlueprintNativeEvent`。完整敌人行动入口，可在蓝图覆写 |
-| `ExecuteMeleeAttack` | `PlayerPawn` | 无 | `BlueprintNativeEvent`。近战攻击表现或效果入口，可在蓝图覆写 |
+| `ExecuteMeleeAttack` | `PlayerPawn` | 无 | `BlueprintNativeEvent`。近战攻击表现入口，可在蓝图覆写 |
+| `ApplyMeleeAttackDamage` | `PlayerPawn` | `FEnemyAttackResolveResult` | 对玩家应用敌人近战伤害。默认 AI 会在触发攻击表现前调用它 |
+| `OnMeleeAttackResolved` | `PlayerPawn`, `AttackResult` | 无 | `BlueprintImplementableEvent`。敌人近战伤害结算后触发表现或提示 |
 | `Kill` | 无 | 无 | 标记死亡、隐藏 Actor、关闭碰撞 |
 
 ### 默认敌人 AI
@@ -115,12 +132,14 @@
 如果蓝图没有覆写 `ExecuteBasicTurn()`，C++ 默认逻辑如下：
 
 1. 如果敌人不可行动或玩家为空，返回 `false`。
-2. 如果敌人与玩家曼哈顿距离为 `1`，调用 `ExecuteMeleeAttack()` 并返回 `true`。
+2. 如果敌人与玩家曼哈顿距离为 `1`，先调用 `ApplyMeleeAttackDamage()` 结算伤害，再调用 `ExecuteMeleeAttack()` 并返回 `true`。
 3. 如果敌人与玩家不相邻，优先沿距离更大的轴靠近玩家一格。
 4. 如果优先方向被阻挡，尝试另一个轴。
-5. 如果移动成功，返回 `true`；否则返回 `false`。
+5. 如果移动成功，立即更新网格占据和 `CurrentGridCoord`，随后用 `MoveDuration` 播放 Actor 位置插值，并返回 `true`；否则返回 `false`。
 
-默认 `ExecuteMeleeAttack()` 只写日志，不会对玩家造成实际数值效果。
+默认 `ExecuteMeleeAttack()` 会调用 `ApplyMeleeAttackDamage()`，并输出攻击日志。默认 AI 已经在进入该事件前完成一次伤害结算，因此内部有防重复保护，避免蓝图调用 Parent 时重复扣血。
+
+如果蓝图只覆写 `ExecuteMeleeAttack`，且仍使用 C++ 默认 `ExecuteBasicTurn()`，伤害仍会在事件触发前结算。如果蓝图覆写了 `ExecuteBasicTurn()` 并完全绕过 Parent，那么需要显式调用 `ApplyMeleeAttackDamage()`，或调用 Parent `Execute Basic Turn`，否则只会播放自定义表现，不会造成数值效果。
 
 ### 蓝图覆写 AI
 
@@ -182,6 +201,39 @@
 
 该结果只描述战斗判定，不直接修改敌人、玩家或格子占据。
 
+### FEnemyAttackDamage
+
+结构：`FEnemyAttackDamage`
+
+路径：`Source/Chessboard_Roguelike/Public/Combat/CombatTypes.h`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `HealthDamage` | `int32` | 本次敌人攻击造成的 HP 伤害 |
+| `ConstructDelta` | `int32` | 本次敌人攻击对玩家构成值造成的变化，通常为负数 |
+| `AcidDelta` | `int32` | 本次敌人攻击对玩家酸性值造成的变化，通常为负数 |
+
+默认近战伤害由 `UCombatResolverComponent::BuildEnemyMeleeDamage()` 从敌人参数生成：
+
+- `HealthDamage = EnemyActor->AttackDamage`
+- `Construct` 敌人在 `bApplyFactionAttributeDamage = true` 时生成 `ConstructDelta = -AttackAttributeDamage`
+- `Acid` 敌人在 `bApplyFactionAttributeDamage = true` 时生成 `AcidDelta = -AttackAttributeDamage`
+
+### FEnemyAttackResolveResult
+
+结构：`FEnemyAttackResolveResult`
+
+路径：`Source/Chessboard_Roguelike/Public/Combat/CombatTypes.h`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `bDamageApplied` | `bool` | 本次攻击是否实际修改了玩家 HP 或属性值 |
+| `bPlayerDefeated` | `bool` | 本次攻击结算后玩家是否已失败 |
+| `AppliedHealthDamage` | `int32` | 实际应用的 HP 伤害 |
+| `AppliedConstructDelta` | `int32` | 实际应用的构成值变化 |
+| `AppliedAcidDelta` | `int32` | 实际应用的酸性值变化 |
+| `RemainingHealth` | `int32` | 结算后的玩家剩余 HP |
+
 ## CombatResolverComponent
 
 类：`UCombatResolverComponent`
@@ -199,6 +251,8 @@
 | --- | --- | --- | --- |
 | `BuildPlayerDamage` | `PlayerActor` | `FCombatDamage` | 从玩家属性组件读取当前双属性伤害 |
 | `ResolvePlayerMeleeAttack` | `PlayerActor`, `EnemyActor` | `FCombatResolveResult` | 结算玩家对目标敌人的近战攻击 |
+| `BuildEnemyMeleeDamage` | `EnemyActor` | `FEnemyAttackDamage` | 从敌人参数生成近战伤害包 |
+| `ResolveEnemyMeleeAttack` | `EnemyActor`, `PlayerPawn` | `FEnemyAttackResolveResult` | 应用敌人对玩家的近战伤害、属性扣减和失败判定 |
 
 ### 免疫与击杀判定
 
@@ -266,18 +320,21 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 
 ## 当前事件与蓝图覆写点
 
-本阶段没有新增战斗专用广播事件，但敌人 Pawn 已提供蓝图覆写点。
+当前阶段已经新增敌人近战伤害结果事件，玩家近战结果仍保持轻量返回值模式。
 
 已有相关事件仍然有效：
 
 | 事件 | 所属类 | 触发时机 | 与战斗的关系 |
 | --- | --- | --- | --- |
 | `OnPlayerAttributeChanged` | `UPlayerAttributeComponent` | 玩家构成值或酸性值变化 | 击杀后玩家进入目标地块并触发地块效果时可能广播 |
+| `OnPlayerHealthChanged` | `UPlayerAttributeComponent` | 玩家 HP 变化 | 敌人近战造成 HP 伤害或后续治疗时广播 |
+| `OnPlayerDefeated` | `UPlayerAttributeComponent` | 玩家 HP 从正数降至 0 | 可用于 UI 或 GameMode 监听失败 |
 | `OnTileTypeChanged` | `AGridManager` | 地块类型变化 | 击杀后进入 Construct/Acid 地块并消耗地块时可能广播 |
 | `ExecuteBasicTurn` | `AGridEnemyPawn` | 敌方回合遍历到该敌人时 | 可覆写完整敌人 AI |
-| `ExecuteMeleeAttack` | `AGridEnemyPawn` | 默认 AI 判断与玩家相邻时 | 可覆写敌人近战表现或效果 |
+| `ExecuteMeleeAttack` | `AGridEnemyPawn` | 默认 AI 判断与玩家相邻时 | 可覆写敌人近战表现 |
+| `OnMeleeAttackResolved` | `AGridEnemyPawn` | 敌人近战伤害结算完成后 | 可根据 `FEnemyAttackResolveResult` 播放受击、死亡或提示表现 |
 
-如果后续需要 UI 或特效直接响应攻击结果，建议新增 `OnPlayerMeleeAttackResolved` 一类的事件，并广播 `FCombatResolveResult`、目标敌人和目标坐标。当前版本先保持战斗层轻量，避免表现逻辑和规则结算耦合。
+如果后续需要 UI 或特效直接响应玩家攻击敌人的结果，建议新增 `OnPlayerMeleeAttackResolved` 一类的事件，并广播 `FCombatResolveResult`、目标敌人和目标坐标。敌人攻击玩家的结果当前已通过 `OnMeleeAttackResolved` 暴露给蓝图表现层。
 
 ## 常见调试点
 
@@ -346,6 +403,16 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 3. 玩家当前源格 `OccupantActor` 是否仍指向玩家 Pawn。
 4. `AGridManager::RequestMove()` 的源格和目标格是否都有效。
 
+### 敌人相邻但没有扣玩家 HP
+
+检查顺序：
+
+1. 敌人是否走了 C++ 默认 `ExecuteBasicTurn()`，或蓝图覆写中是否调用了 Parent / `ApplyMeleeAttackDamage()`。
+2. 玩家 Pawn 上是否存在 `CombatResolverComponent` 和 `PlayerAttributeComponent`。
+3. 敌人是否被玩家当前属性压制；被压制时默认 AI 会跳过攻击。
+4. 敌人 `AttackDamage` 是否大于 `0`。
+5. 玩家是否已经处于 `IsDefeated()` 状态；失败后不会继续重复扣血。
+
 ## 当前边界
 
 已实现：
@@ -359,15 +426,17 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 - 击杀后进入目标格时触发原有地块效果。
 - 敌人管理器统一调度敌方回合。
 - 敌人默认基础 AI：相邻攻击，否则尝试靠近玩家。
+- 敌人移动视觉插值，移动期间敌方回合保持锁定。
+- 敌人默认近战会对玩家造成 HP 伤害。
+- 敌人可按阵营扣减玩家构成值或酸性值。
+- 玩家 HP 归零后进入 `Defeat` 回合状态。
+- 敌人近战伤害结果可通过 `OnMeleeAttackResolved` 供蓝图表现层使用。
 - `ExecuteBasicTurn` 和 `ExecuteMeleeAttack` 可在蓝图中覆写。
 
 未实现：
 
-- 敌人主动攻击玩家的实际数值效果。
 - 敌人远程攻击。
 - 敌人友伤。
-- 压制状态。
 - 击杀掉落地块转换能量。
-- 战斗专用 UI 提示。
 - 战斗专用音效和特效事件。
 - 敌人 DataAsset 配置表。

@@ -31,6 +31,47 @@ void UPlayerAttributeComponent::AddAcidValue(int32 Delta)
 	ApplyTileAttributeDelta(0, Delta);
 }
 
+bool UPlayerAttributeComponent::ApplyHealthDamage(int32 DamageAmount)
+{
+	if (DamageAmount <= 0 || IsDefeated())
+	{
+		return false;
+	}
+
+	const int32 OldHealth = CurrentHealth;
+	CurrentHealth = FMath::Clamp(CurrentHealth - DamageAmount, 0, MaxHealth);
+
+	if (CurrentHealth != OldHealth)
+	{
+		OnPlayerHealthChanged.Broadcast(CurrentHealth, MaxHealth);
+	}
+
+	if (OldHealth > 0 && CurrentHealth <= 0)
+	{
+		OnPlayerDefeated.Broadcast();
+	}
+
+	return CurrentHealth != OldHealth;
+}
+
+bool UPlayerAttributeComponent::Heal(int32 HealAmount)
+{
+	if (HealAmount <= 0)
+	{
+		return false;
+	}
+
+	const int32 OldHealth = CurrentHealth;
+	CurrentHealth = FMath::Clamp(CurrentHealth + HealAmount, 0, MaxHealth);
+
+	if (CurrentHealth != OldHealth)
+	{
+		OnPlayerHealthChanged.Broadcast(CurrentHealth, MaxHealth);
+	}
+
+	return CurrentHealth != OldHealth;
+}
+
 int32 UPlayerAttributeComponent::GetConstructValue() const
 {
 	return ConstructValue;
@@ -41,6 +82,16 @@ int32 UPlayerAttributeComponent::GetAcidValue() const
 	return AcidValue;
 }
 
+int32 UPlayerAttributeComponent::GetCurrentHealth() const
+{
+	return CurrentHealth;
+}
+
+int32 UPlayerAttributeComponent::GetMaxHealth() const
+{
+	return MaxHealth;
+}
+
 int32 UPlayerAttributeComponent::GetMaxConstructValue() const
 {
 	return MaxConstructValue;
@@ -49,6 +100,11 @@ int32 UPlayerAttributeComponent::GetMaxConstructValue() const
 int32 UPlayerAttributeComponent::GetMaxAcidValue() const
 {
 	return MaxAcidValue;
+}
+
+float UPlayerAttributeComponent::GetHealthRatio() const
+{
+	return MaxHealth > 0 ? static_cast<float>(CurrentHealth) / static_cast<float>(MaxHealth) : 0.f;
 }
 
 float UPlayerAttributeComponent::GetConstructRatio() const
@@ -92,4 +148,9 @@ bool UPlayerAttributeComponent::CanSuppressFaction(EEnemyFaction EnemyFaction) c
 	default:
 		return false;
 	}
+}
+
+bool UPlayerAttributeComponent::IsDefeated() const
+{
+	return CurrentHealth <= 0;
 }

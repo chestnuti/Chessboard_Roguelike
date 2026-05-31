@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Combat/CombatTypes.h"
 #include "Enemy/EnemyTypes.h"
 #include "GameFramework/Pawn.h"
 #include "GridEnemyPawn.generated.h"
@@ -19,6 +20,7 @@ public:
 	AGridEnemyPawn();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> EnemyMesh;
@@ -33,6 +35,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy", meta = (ClampMin = "1"))
 	int32 KillThreshold = 5;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy|Attack", meta = (ClampMin = "0"))
+	int32 AttackDamage = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy|Attack", meta = (ClampMin = "0"))
+	int32 AttackAttributeDamage = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy|Attack")
+	bool bApplyFactionAttributeDamage = true;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Grid")
 	FIntPoint CurrentGridCoord = FIntPoint::ZeroValue;
 
@@ -44,6 +55,12 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Enemy")
 	bool bDead = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
+	float MoveDuration = 0.15f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Movement")
+	bool bIsMoving = false;
 
 	UPROPERTY()
 	TObjectPtr<AGridManager> GridManager;
@@ -75,12 +92,26 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Enemy")
 	void ExecuteMeleeAttack(AGridPawn* PlayerPawn);
 
+	UFUNCTION(BlueprintCallable, Category = "Enemy|Attack")
+	FEnemyAttackResolveResult ApplyMeleeAttackDamage(AGridPawn* PlayerPawn);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Attack")
+	void OnMeleeAttackResolved(AGridPawn* PlayerPawn, FEnemyAttackResolveResult AttackResult);
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void Kill();
+
+	void StartVisualMove(const FVector& From, const FVector& To);
+	void FinishVisualMove();
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<USceneComponent> SceneRoot;
 
+	FVector VisualMoveFrom = FVector::ZeroVector;
+	FVector VisualMoveTo = FVector::ZeroVector;
+	float MoveElapsedTime = 0.f;
 	bool bInitializedOnGrid = false;
+	bool bMeleeDamageResolvedInCurrentAttack = false;
+	FEnemyAttackResolveResult LastMeleeAttackResult;
 };

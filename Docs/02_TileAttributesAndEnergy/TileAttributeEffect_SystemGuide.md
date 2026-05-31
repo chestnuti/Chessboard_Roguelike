@@ -102,12 +102,14 @@
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
+| `CurrentHealth` | `3` | 当前玩家 HP |
+| `MaxHealth` | `3` | 玩家 HP 上限 |
 | `ConstructValue` | `0` | 当前构成值 |
 | `AcidValue` | `0` | 当前酸性值 |
 | `MaxConstructValue` | `10` | 构成值上限 |
 | `MaxAcidValue` | `10` | 酸性值上限 |
 
-所有属性变化都会 Clamp 到 `[0, MaxValue]`。
+所有属性变化都会 Clamp 到 `[0, MaxValue]`。HP 归零后玩家进入失败状态，由战斗/敌人回合系统负责切换 `TurnManager` 到 `Defeat`。
 
 ### 蓝图可调用函数
 
@@ -116,6 +118,11 @@
 | `ApplyTileAttributeDelta` | `ConstructDelta`, `AcidDelta` | 无 | 同时修改构成值和酸性值，并 Clamp |
 | `AddConstructValue` | `Delta` | 无 | 修改构成值 |
 | `AddAcidValue` | `Delta` | 无 | 修改酸性值 |
+| `ApplyHealthDamage` | `DamageAmount` | `bool` | 扣减 HP，成功修改时广播生命事件，HP 从正数降至 0 时广播失败事件 |
+| `Heal` | `HealAmount` | `bool` | 恢复 HP，并 Clamp 到 `MaxHealth` |
+| `GetCurrentHealth` | 无 | `int32` | 当前 HP |
+| `GetMaxHealth` | 无 | `int32` | HP 上限 |
+| `GetHealthRatio` | 无 | `float` | `CurrentHealth / MaxHealth` |
 | `GetConstructValue` | 无 | `int32` | 当前构成值 |
 | `GetAcidValue` | 无 | `int32` | 当前酸性值 |
 | `GetMaxConstructValue` | 无 | `int32` | 构成值上限 |
@@ -124,24 +131,20 @@
 | `GetAcidRatio` | 无 | `float` | `AcidValue / MaxAcidValue` |
 | `IsConstructValueMaxed` | 无 | `bool` | 构成值是否达到上限 |
 | `IsAcidValueMaxed` | 无 | `bool` | 酸性值是否达到上限 |
+| `IsDefeated` | 无 | `bool` | 当前 HP 是否小于等于 0 |
 
 ### 事件
 
-事件：`OnPlayerAttributeChanged`
-
-参数：
-
-- `NewConstructValue`
-- `NewAcidValue`
-
-触发条件：
-
-- `ApplyTileAttributeDelta()` 执行后，最终 Clamp 后的任一属性值发生变化。
+| 事件 | 参数 | 触发条件 |
+| --- | --- | --- |
+| `OnPlayerAttributeChanged` | `NewConstructValue`, `NewAcidValue` | `ApplyTileAttributeDelta()` 执行后，最终 Clamp 后的任一属性值发生变化 |
+| `OnPlayerHealthChanged` | `NewHealth`, `MaxHealth` | `ApplyHealthDamage()` 或 `Heal()` 执行后，最终 HP 发生变化 |
+| `OnPlayerDefeated` | 无 | HP 从正数降至 `0` |
 
 推荐用途：
 
-- HUD 监听该事件刷新文本和进度条。
-- 需要响应属性变化的视觉或音效逻辑监听该事件。
+- HUD 监听属性和 HP 事件刷新文本和进度条。
+- 需要响应属性变化、受击或失败的视觉/音效逻辑监听对应事件。
 
 不推荐用途：
 
@@ -363,6 +366,8 @@ Mark Render State Dirty = true
 
 | 控件名 | 类型 | 说明 |
 | --- | --- | --- |
+| `HealthText` | `TextBlock` | 显示 `HP: 当前值 / 最大值` |
+| `HealthProgressBar` | `ProgressBar` | 显示 HP 比例 |
 | `ConstructText` | `TextBlock` | 显示 `Construct: 当前值 / 最大值` |
 | `AcidText` | `TextBlock` | 显示 `Acid: 当前值 / 最大值` |
 | `ConstructProgressBar` | `ProgressBar` | 显示构成值比例 |
@@ -379,6 +384,7 @@ HUD 行为：
 
 - `NativeConstruct()` 时尝试从 `GetOwningPlayerPawn()` 获取 `UPlayerAttributeComponent`。
 - 监听 `OnPlayerAttributeChanged`。
+- 监听 `OnPlayerHealthChanged`。
 - 属性变化时刷新文本和进度条。
 - 不使用 Tick。
 - 不写入玩家属性。
@@ -404,7 +410,7 @@ HUD 行为：
 1. Pawn 上是否有 `PlayerAttributeComponent`。
 2. Controller 是否创建了 `WBP_PlayerAttributeHUD`。
 3. HUD 是否成功绑定属性组件。
-4. 是否监听了 `OnPlayerAttributeChanged`。
+4. 是否监听了 `OnPlayerAttributeChanged` 或 `OnPlayerHealthChanged`。
 5. 属性是否真的发生变化；Clamp 后无变化时不会广播。
 
 ### Construct/Acid 只生效一次

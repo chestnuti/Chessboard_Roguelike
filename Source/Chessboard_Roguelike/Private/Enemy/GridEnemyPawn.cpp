@@ -1,5 +1,6 @@
 #include "Enemy/GridEnemyPawn.h"
 
+#include "Combat/CombatResolverComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
@@ -11,7 +12,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogGridEnemyPawn, Log, All);
 
 AGridEnemyPawn::AGridEnemyPawn()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	SetRootComponent(SceneRoot);
@@ -52,6 +54,31 @@ void AGridEnemyPawn::BeginPlay()
 	InitializeOnGrid(FoundGridManager, StartGridCoord);
 }
 
+void AGridEnemyPawn::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (!bIsMoving)
+	{
+		return;
+	}
+
+	if (MoveDuration <= KINDA_SMALL_NUMBER)
+	{
+		FinishVisualMove();
+		return;
+	}
+
+	MoveElapsedTime += DeltaSeconds;
+	const float Alpha = FMath::Clamp(MoveElapsedTime / MoveDuration, 0.f, 1.f);
+	SetActorLocation(FMath::Lerp(VisualMoveFrom, VisualMoveTo, Alpha));
+
+	if (Alpha >= 1.f)
+	{
+		FinishVisualMove();
+	}
+}
+
 void AGridEnemyPawn::InitializeOnGrid(AGridManager* InGridManager, FIntPoint InStartCoord)
 {
 	if (!InGridManager)
@@ -87,6 +114,8 @@ void AGridEnemyPawn::InitializeOnGrid(AGridManager* InGridManager, FIntPoint InS
 
 	CurrentGridCoord = InStartCoord;
 	SetActorLocation(GridManager->GridToWorld(CurrentGridCoord));
+	bIsMoving = false;
+	SetActorTickEnabled(false);
 	bDead = false;
 	bInitializedOnGrid = true;
 	SetActorHiddenInGame(false);
@@ -104,7 +133,7 @@ bool AGridEnemyPawn::IsAlive() const
 
 bool AGridEnemyPawn::CanAct() const
 {
-	return IsAlive() && GridManager != nullptr;
+	return IsAlive() && GridManager != nullptr && !bIsMoving;
 }
 
 bool AGridEnemyPawn::IsSuppressedByPlayer(const AGridPawn* PlayerPawn) const
@@ -130,13 +159,16 @@ bool AGridEnemyPawn::TryMoveToGridCoord(FIntPoint TargetCoord)
 		return false;
 	}
 
+	const FVector FromLocation = GetActorLocation();
+	const FVector ToLocation = GridManager->GridToWorld(TargetCoord);
+
 	if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
 	{
 		return false;
 	}
 
 	CurrentGridCoord = TargetCoord;
-	SetActorLocation(GridManager->GridToWorld(CurrentGridCoord));
+	StartVisualMove(FromLocation, ToLocation);
 	return true;
 }
 
@@ -158,7 +190,10 @@ bool AGridEnemyPawn::ExecuteBasicTurn_Implementation(AGridPawn* PlayerPawn)
 	const int32 ManhattanDistance = FMath::Abs(Delta.X) + FMath::Abs(Delta.Y);
 	if (ManhattanDistance == 1)
 	{
+		bMeleeDamageResolvedInCurrentAttack = false;
+		LastMeleeAttackResult = ApplyMeleeAttackDamage(PlayerPawn);
 		ExecuteMeleeAttack(PlayerPawn);
+		bMeleeDamageResolvedInCurrentAttack = false;
 		return true;
 	}
 
@@ -202,8 +237,50 @@ bool AGridEnemyPawn::ExecuteBasicTurn_Implementation(AGridPawn* PlayerPawn)
 
 void AGridEnemyPawn::ExecuteMeleeAttack_Implementation(AGridPawn* PlayerPawn)
 {
-	UE_LOG(LogGridEnemyPawn, Log, TEXT("%s attacks %s."),
-		*GetNameSafe(this), *GetNameSafe(PlayerPawn));
+	const FEnemyAttackResolveResult AttackResult = ApplyMeleeAttackDamage(PlayerPawn);
+
+	UE_LOG(LogGridEnemyPawn, Log, TEXT("%s attacks %s for %d HP damage. Remaining HP: %d."),
+		*GetNameSafe(this),
+		*GetNameSafe(PlayerPawn),
+		AttackResult.AppliedHealthDamage,
+		AttackResult.RemainingHealth);
+}
+
+FEnemyAttackResolveResult AGridEnemyPawn::ApplyMeleeAttackDamage(AGridPawn* PlayerPawn)
+{
+	if (!CanAct() || !PlayerPawn)
+	{
+		return FEnemyAttackResolveResult();
+	}
+
+	if (bMeleeDamageResolvedInCurrentAttack)
+	{
+		return LastMeleeAttackResult;
+	}
+
+	UCombatResolverComponent* CombatResolver = PlayerPawn->CombatResolverComponent;
+	if (!CombatResolver)
+	{
+		CombatResolver = PlayerPawn->FindComponentByClass<UCombatResolverComponent>();
+	}
+
+	FEnemyAttackResolveResult AttackResult;
+	if (CombatResolver)
+	{
+		AttackResult = CombatResolver->ResolveEnemyMeleeAttack(this, PlayerPawn);
+	}
+	else
+	{
+		UE_LOG(LogGridEnemyPawn, Warning, TEXT("%s could not damage %s: CombatResolverComponent not found."),
+			*GetNameSafe(this), *GetNameSafe(PlayerPawn));
+	}
+
+	LastMeleeAttackResult = AttackResult;
+	bMeleeDamageResolvedInCurrentAttack = true;
+
+	OnMeleeAttackResolved(PlayerPawn, AttackResult);
+
+	return AttackResult;
 }
 
 void AGridEnemyPawn::Kill()
@@ -216,5 +293,25 @@ void AGridEnemyPawn::Kill()
 	bDead = true;
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
+	bIsMoving = false;
+	SetActorTickEnabled(false);
 	UE_LOG(LogGridEnemyPawn, Log, TEXT("%s killed."), *GetNameSafe(this));
+}
+
+void AGridEnemyPawn::StartVisualMove(const FVector& From, const FVector& To)
+{
+	VisualMoveFrom = From;
+	VisualMoveTo = To;
+	MoveElapsedTime = 0.f;
+	bIsMoving = true;
+	SetActorLocation(VisualMoveFrom);
+	SetActorTickEnabled(true);
+}
+
+void AGridEnemyPawn::FinishVisualMove()
+{
+	SetActorLocation(VisualMoveTo);
+	bIsMoving = false;
+	MoveElapsedTime = 0.f;
+	SetActorTickEnabled(false);
 }

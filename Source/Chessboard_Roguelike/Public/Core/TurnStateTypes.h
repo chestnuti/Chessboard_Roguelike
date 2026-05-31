@@ -12,8 +12,14 @@ enum class ETurnState : uint8
 	PlayerInput,
 	// Short lock window while movement/effects resolve.
 	PlayerActionResolve,
-	// Reserved for later enemy logic; intentionally unused by the current prototype.
+	// Enemy manager is resolving active enemy actions.
 	EnemyTurnResolve,
 	// Reserved for later map/tile resolution after actor actions.
-	MapResolve
+	MapResolve,
+	// Final validation point for win/loss logic after actors and map effects resolve.
+	CheckEndCondition,
+	// Terminal state after all active enemies or objectives are cleared.
+	Victory,
+	// Terminal state after the player's HP reaches zero.
+	Defeat
 };

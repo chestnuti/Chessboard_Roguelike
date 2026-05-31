@@ -325,6 +325,8 @@ void AGridPlayerController::MoveRight()
 
 私有但可在蓝图 Details 中编辑的值：
 
+- `CurrentHealth`
+- `MaxHealth`
 - `ConstructValue`
 - `AcidValue`
 - `MaxConstructValue`
@@ -332,6 +334,11 @@ void AGridPlayerController::MoveRight()
 
 可调用函数：
 
+- `ApplyHealthDamage(DamageAmount)`: 扣减 HP。
+- `Heal(HealAmount)`: 恢复 HP。
+- `GetCurrentHealth()`
+- `GetMaxHealth()`
+- `GetHealthRatio()`: 返回 0 到 1。
 - `ApplyTileAttributeDelta(ConstructDelta, AcidDelta)`: 同时应用两个属性变化。
 - `AddConstructValue(Delta)`: 修改 Construct。
 - `AddAcidValue(Delta)`: 修改 Acid。
@@ -343,14 +350,19 @@ void AGridPlayerController::MoveRight()
 - `GetAcidRatio()`: 返回 0 到 1。
 - `IsConstructValueMaxed()`
 - `IsAcidValueMaxed()`
+- `IsDefeated()`
 
 事件：
 
 - `OnPlayerAttributeChanged(NewConstructValue, NewAcidValue)`
+- `OnPlayerHealthChanged(NewHealth, MaxHealth)`
+- `OnPlayerDefeated()`
 
 触发时机：
 
 - `ApplyTileAttributeDelta()` 后，任一属性的最终值发生变化才广播。
+- `ApplyHealthDamage()` 或 `Heal()` 后，HP 的最终值发生变化才广播。
+- HP 从正数降到 0 时广播 `OnPlayerDefeated()`。
 - 属性值会 Clamp 到 `[0, MaxValue]`。
 
 ## 属性 HUD
@@ -361,6 +373,8 @@ void AGridPlayerController::MoveRight()
 
 可绑定控件名：
 
+- `HealthText`
+- `HealthProgressBar`
 - `ConstructText`
 - `AcidText`
 - `ConstructProgressBar`
@@ -377,6 +391,7 @@ void AGridPlayerController::MoveRight()
 - 如果没有该 Widget Blueprint，则使用原生 fallback Widget Tree。
 - HUD 只读属性组件，不写 gameplay 数据。
 - HUD 监听 `OnPlayerAttributeChanged`，不使用 Tick 轮询。
+- HUD 监听 `OnPlayerHealthChanged` 刷新 HP 文本和进度条。
 
 ## 常见修改方式
 

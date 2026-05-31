@@ -18,6 +18,7 @@ public:
 	AGridEnemyManager();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void InitializeEnemyManager(AGridManager* InGridManager, ATurnManager* InTurnManager, AGridPawn* InPlayerPawn);
@@ -33,6 +34,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void ExecuteEnemyTurn();
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy")
+	bool ShouldDelayEnemyTurnEnd() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy")
 	TArray<AGridEnemyPawn*> GetAliveEnemies() const;
@@ -52,4 +56,7 @@ public:
 private:
 	void AutoInitializeReferences();
 	void PruneInvalidEnemies();
+	bool HasMovingEnemies() const;
+
+	bool bWaitingForEnemyMovement = false;
 };

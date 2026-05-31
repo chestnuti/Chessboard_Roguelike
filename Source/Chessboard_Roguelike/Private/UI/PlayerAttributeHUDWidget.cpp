@@ -46,6 +46,19 @@ void UPlayerAttributeHUDWidget::RefreshAttributeDisplay()
 	}
 
 	// Pull current values from the component during initialization and whenever its change event fires.
+	if (HealthText)
+	{
+		HealthText->SetText(FText::Format(
+			NSLOCTEXT("PlayerAttributeHUD", "HealthValueFormat", "HP: {0} / {1}"),
+			FText::AsNumber(AttributeComponent->GetCurrentHealth()),
+			FText::AsNumber(AttributeComponent->GetMaxHealth())));
+	}
+
+	if (HealthProgressBar)
+	{
+		HealthProgressBar->SetPercent(AttributeComponent->GetHealthRatio());
+	}
+
 	if (ConstructText)
 	{
 		ConstructText->SetText(FText::Format(
@@ -79,9 +92,14 @@ void UPlayerAttributeHUDWidget::HandlePlayerAttributeChanged(int32 NewConstructV
 	RefreshAttributeDisplay();
 }
 
+void UPlayerAttributeHUDWidget::HandlePlayerHealthChanged(int32 NewHealth, int32 MaxHealth)
+{
+	RefreshAttributeDisplay();
+}
+
 void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 {
-	if (!WidgetTree || ConstructText || AcidText || ConstructProgressBar || AcidProgressBar)
+	if (!WidgetTree || HealthText || HealthProgressBar || ConstructText || AcidText || ConstructProgressBar || AcidProgressBar)
 	{
 		// Widget Blueprints with named bindings keep their authored layout.
 		return;
@@ -90,10 +108,23 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 	UVerticalBox* RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("AttributeRoot"));
 	WidgetTree->RootWidget = RootBox;
 
+	HealthText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HealthText"));
+	HealthProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("HealthProgressBar"));
 	ConstructText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ConstructText"));
 	ConstructProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("ConstructProgressBar"));
 	AcidText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("AcidText"));
 	AcidProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("AcidProgressBar"));
+
+	if (HealthText)
+	{
+		HealthText->SetText(NSLOCTEXT("PlayerAttributeHUD", "HealthInitialText", "HP: 3 / 3"));
+		RootBox->AddChildToVerticalBox(HealthText);
+	}
+
+	if (HealthProgressBar)
+	{
+		RootBox->AddChildToVerticalBox(HealthProgressBar);
+	}
 
 	if (ConstructText)
 	{
@@ -132,6 +163,7 @@ void UPlayerAttributeHUDWidget::BindToAttributeComponent(UPlayerAttributeCompone
 	{
 		// Event-driven HUD refresh: no Tick polling and no direct gameplay writes from UI.
 		AttributeComponent->OnPlayerAttributeChanged.AddDynamic(this, &UPlayerAttributeHUDWidget::HandlePlayerAttributeChanged);
+		AttributeComponent->OnPlayerHealthChanged.AddDynamic(this, &UPlayerAttributeHUDWidget::HandlePlayerHealthChanged);
 	}
 }
 
@@ -141,6 +173,7 @@ void UPlayerAttributeHUDWidget::UnbindFromAttributeComponent()
 	{
 		// Remove dynamic binding during widget teardown to avoid callbacks to a dead widget.
 		AttributeComponent->OnPlayerAttributeChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandlePlayerAttributeChanged);
+		AttributeComponent->OnPlayerHealthChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandlePlayerHealthChanged);
 		AttributeComponent = nullptr;
 	}
 }
