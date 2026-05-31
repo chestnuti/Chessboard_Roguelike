@@ -20,10 +20,19 @@ struct CHESSBOARD_ROGUELIKE_API FGridInitialTileOverride
 	ETileType TileType = ETileType::Minimal;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid")
+	EGridCellRole CellRole = EGridCellRole::Open;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid")
 	bool bWalkable = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid")
 	bool bConvertible = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid")
+	int32 RegionId = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grid")
+	int32 Depth = 0;
 };
 
 UCLASS(BlueprintType)

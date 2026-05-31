@@ -61,12 +61,86 @@ void AGridManager::BeginPlay()
 
 void AGridManager::GenerateGrid()
 {
+	ClearGridState();
+
+	if (!HasValidGridSettings())
+	{
+		return;
+	}
+
+	CurrentWidth = GridSettings->Width;
+	CurrentHeight = GridSettings->Height;
+
+	TArray<FGridTileLayoutData> TileLayout;
+	BuildDefaultTileLayout(TileLayout);
+	ApplyInitialTileOverrides(TileLayout);
+	ApplyTileLayoutInternal(TileLayout);
+	RebuildTileVisuals();
+
+	UE_LOG(LogGridManager, Log, TEXT("Generated grid: %d x %d (%d tiles)."),
+		CurrentWidth, CurrentHeight, Tiles.Num());
+}
+
+bool AGridManager::ApplyTileLayout(const TArray<FGridTileLayoutData>& TileLayout, int32 LayoutWidth, int32 LayoutHeight)
+{
+	ClearGridState();
+
+	if (LayoutWidth <= 0 || LayoutHeight <= 0)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("ApplyTileLayout failed: invalid layout dimensions Width=%d Height=%d."),
+			LayoutWidth, LayoutHeight);
+		return false;
+	}
+
+	if (!GridSettings || GridSettings->TileSize <= KINDA_SMALL_NUMBER)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("ApplyTileLayout failed: GridSettings with a valid TileSize is required."));
+		return false;
+	}
+
+	if (TileLayout.IsEmpty())
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("ApplyTileLayout failed: TileLayout is empty."));
+		return false;
+	}
+
+	CurrentWidth = LayoutWidth;
+	CurrentHeight = LayoutHeight;
+	ApplyTileLayoutInternal(TileLayout);
+	RebuildTileVisuals();
+
+	UE_LOG(LogGridManager, Log, TEXT("Applied tile layout: %d x %d (%d tiles)."),
+		CurrentWidth, CurrentHeight, Tiles.Num());
+	return true;
+}
+
+bool AGridManager::HasValidGridSettings() const
+{
+	if (!GridSettings)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("GenerateGrid failed: GridSettings is not assigned."));
+		return false;
+	}
+
+	if (GridSettings->Width <= 0 || GridSettings->Height <= 0 || GridSettings->TileSize <= KINDA_SMALL_NUMBER)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("GenerateGrid failed: invalid settings Width=%d Height=%d TileSize=%f."),
+			GridSettings->Width, GridSettings->Height, GridSettings->TileSize);
+		return false;
+	}
+
+	return true;
+}
+
+void AGridManager::ClearGridState()
+{
 	Tiles.Empty();
 	TileInstanceIndices.Empty();
+	CurrentWidth = 0;
+	CurrentHeight = 0;
 
 	if (TileISM)
 	{
-		// Regeneration starts from a clean visual layer to match the rebuilt Tiles map.
 		TileISM->ClearInstances();
 		TileISM->NumCustomDataFloats = TileTypeCustomDataFloatCount;
 		if (GridSettings && GridSettings->TileMesh)
@@ -74,77 +148,158 @@ void AGridManager::GenerateGrid()
 			TileISM->SetStaticMesh(GridSettings->TileMesh);
 		}
 	}
+}
 
+void AGridManager::BuildDefaultTileLayout(TArray<FGridTileLayoutData>& OutTileLayout) const
+{
+	OutTileLayout.Reset();
 	if (!GridSettings)
 	{
-		UE_LOG(LogGridManager, Warning, TEXT("GenerateGrid failed: GridSettings is not assigned."));
 		return;
 	}
 
-	if (GridSettings->Width <= 0 || GridSettings->Height <= 0 || GridSettings->TileSize <= KINDA_SMALL_NUMBER)
-	{
-		UE_LOG(LogGridManager, Warning, TEXT("GenerateGrid failed: invalid settings Width=%d Height=%d TileSize=%f."),
-			GridSettings->Width, GridSettings->Height, GridSettings->TileSize);
-		return;
-	}
-
-	Tiles.Reserve(GridSettings->Width * GridSettings->Height);
-
+	OutTileLayout.Reserve(GridSettings->Width * GridSettings->Height);
 	for (int32 Y = 0; Y < GridSettings->Height; ++Y)
 	{
 		for (int32 X = 0; X < GridSettings->Width; ++X)
 		{
-			const FIntPoint Coord(X, Y);
-
-			// Every tile starts with deterministic defaults before optional authored overrides.
-			FTileData TileData;
-			TileData.GridCoord = Coord;
-			TileData.TileType = ETileType::Minimal;
-			TileData.OccupantType = EGridOccupantType::Empty;
-			TileData.OccupantActor.Reset();
-			TileData.bWalkable = TileData.TileType != ETileType::Obstacle;
-			TileData.bConvertible = true;
-
-			// Apply authored prototype tile types after defaults so unlisted tiles remain Minimal.
-			if (const FGridInitialTileOverride* TileOverride = GridSettings->InitialTileOverrides.FindByPredicate(
-				[Coord](const FGridInitialTileOverride& Candidate)
-				{
-					return Candidate.GridCoord == Coord;
-				}))
-			{
-				TileData.TileType = TileOverride->TileType;
-				TileData.bWalkable = TileOverride->bWalkable && TileData.TileType != ETileType::Obstacle;
-				TileData.bConvertible = TileOverride->bConvertible;
-				TileData.OccupantType = TileData.TileType == ETileType::Obstacle ? EGridOccupantType::Obstacle : EGridOccupantType::Empty;
-			}
-
-			Tiles.Add(Coord, TileData);
-
-			if (TileISM && GridSettings->TileMesh)
-			{
-				FVector InstanceScale = FVector::OneVector;
-				const FVector MeshSize = GridSettings->TileMesh->GetBounds().BoxExtent * 2.f;
-				// Scale the visual mesh to TileSize so changing settings affects both logic and display.
-				if (MeshSize.X > KINDA_SMALL_NUMBER)
-				{
-					InstanceScale.X = GridSettings->TileSize / MeshSize.X;
-				}
-				if (MeshSize.Y > KINDA_SMALL_NUMBER)
-				{
-					InstanceScale.Y = GridSettings->TileSize / MeshSize.Y;
-				}
-
-				const int32 InstanceIndex = TileISM->AddInstance(FTransform(FRotator::ZeroRotator, GridToWorld(Coord), InstanceScale), true);
-				TileInstanceIndices.Add(Coord, InstanceIndex);
-
-				// Materials can read PerInstanceCustomData[0] to choose Minimal/Construct/Acid/Obstacle visuals.
-				ApplyTileInstanceCustomData(Coord, TileData.TileType);
-			}
+			FGridTileLayoutData LayoutData;
+			LayoutData.GridCoord = FIntPoint(X, Y);
+			LayoutData.TileType = ETileType::Minimal;
+			LayoutData.CellRole = EGridCellRole::Open;
+			LayoutData.bWalkable = true;
+			LayoutData.bConvertible = true;
+			LayoutData.RegionId = INDEX_NONE;
+			LayoutData.Depth = 0;
+			OutTileLayout.Add(LayoutData);
 		}
 	}
+}
 
-	UE_LOG(LogGridManager, Log, TEXT("Generated grid: %d x %d (%d tiles)."),
-		GridSettings->Width, GridSettings->Height, Tiles.Num());
+void AGridManager::ApplyInitialTileOverrides(TArray<FGridTileLayoutData>& TileLayout) const
+{
+	if (!GridSettings)
+	{
+		return;
+	}
+
+	for (const FGridInitialTileOverride& TileOverride : GridSettings->InitialTileOverrides)
+	{
+		if (TileOverride.GridCoord.X < 0 || TileOverride.GridCoord.Y < 0
+			|| TileOverride.GridCoord.X >= GridSettings->Width || TileOverride.GridCoord.Y >= GridSettings->Height)
+		{
+			UE_LOG(LogGridManager, Warning, TEXT("Initial tile override ignored: invalid coord (%d,%d)."),
+				TileOverride.GridCoord.X, TileOverride.GridCoord.Y);
+			continue;
+		}
+
+		const int32 TileIndex = TileOverride.GridCoord.Y * GridSettings->Width + TileOverride.GridCoord.X;
+		if (!TileLayout.IsValidIndex(TileIndex))
+		{
+			continue;
+		}
+
+		FGridTileLayoutData& LayoutData = TileLayout[TileIndex];
+		LayoutData.TileType = TileOverride.TileType;
+		LayoutData.CellRole = TileOverride.CellRole;
+		LayoutData.bWalkable = TileOverride.bWalkable;
+		LayoutData.bConvertible = TileOverride.bConvertible;
+		LayoutData.RegionId = TileOverride.RegionId;
+		LayoutData.Depth = TileOverride.Depth;
+	}
+}
+
+void AGridManager::ApplyTileLayoutInternal(const TArray<FGridTileLayoutData>& TileLayout)
+{
+	Tiles.Reserve(TileLayout.Num());
+	for (const FGridTileLayoutData& LayoutData : TileLayout)
+	{
+		if (LayoutData.GridCoord.X < 0 || LayoutData.GridCoord.Y < 0
+			|| LayoutData.GridCoord.X >= CurrentWidth || LayoutData.GridCoord.Y >= CurrentHeight)
+		{
+			UE_LOG(LogGridManager, Warning, TEXT("Tile layout entry ignored: coord (%d,%d) outside %d x %d."),
+				LayoutData.GridCoord.X, LayoutData.GridCoord.Y, CurrentWidth, CurrentHeight);
+			continue;
+		}
+
+		Tiles.Add(LayoutData.GridCoord, MakeTileDataFromLayout(LayoutData));
+	}
+}
+
+FTileData AGridManager::MakeTileDataFromLayout(const FGridTileLayoutData& LayoutData) const
+{
+	FTileData TileData;
+	TileData.GridCoord = LayoutData.GridCoord;
+	TileData.TileType = LayoutData.TileType;
+	TileData.CellRole = LayoutData.CellRole;
+	TileData.RegionId = LayoutData.RegionId;
+	TileData.Depth = LayoutData.Depth;
+	TileData.OccupantActor.Reset();
+	TileData.bConvertible = LayoutData.bConvertible;
+
+	const bool bBlockingCell = LayoutData.TileType == ETileType::Obstacle || LayoutData.CellRole == EGridCellRole::Wall;
+	TileData.bWalkable = LayoutData.bWalkable && !bBlockingCell;
+	TileData.OccupantType = TileData.bWalkable ? EGridOccupantType::Empty : EGridOccupantType::Obstacle;
+	return TileData;
+}
+
+void AGridManager::RebuildTileVisuals()
+{
+	if (!TileISM || !GridSettings || !GridSettings->TileMesh)
+	{
+		return;
+	}
+
+	TileISM->ClearInstances();
+	TileInstanceIndices.Empty();
+	TileISM->NumCustomDataFloats = TileTypeCustomDataFloatCount;
+	TileISM->SetStaticMesh(GridSettings->TileMesh);
+
+	if (CurrentWidth > 0 && CurrentHeight > 0)
+	{
+		for (int32 Y = 0; Y < CurrentHeight; ++Y)
+		{
+			for (int32 X = 0; X < CurrentWidth; ++X)
+			{
+				if (const FTileData* TileData = Tiles.Find(FIntPoint(X, Y)))
+				{
+					AddTileVisualInstance(*TileData);
+				}
+			}
+		}
+		return;
+	}
+
+	for (const TPair<FIntPoint, FTileData>& TilePair : Tiles)
+	{
+		AddTileVisualInstance(TilePair.Value);
+	}
+}
+
+void AGridManager::AddTileVisualInstance(const FTileData& TileData)
+{
+	if (!TileISM || !GridSettings || !GridSettings->TileMesh)
+	{
+		return;
+	}
+
+	FVector InstanceScale = FVector::OneVector;
+	const FVector MeshSize = GridSettings->TileMesh->GetBounds().BoxExtent * 2.f;
+	// Scale the visual mesh to TileSize so changing settings affects both logic and display.
+	if (MeshSize.X > KINDA_SMALL_NUMBER)
+	{
+		InstanceScale.X = GridSettings->TileSize / MeshSize.X;
+	}
+	if (MeshSize.Y > KINDA_SMALL_NUMBER)
+	{
+		InstanceScale.Y = GridSettings->TileSize / MeshSize.Y;
+	}
+
+	const int32 InstanceIndex = TileISM->AddInstance(FTransform(FRotator::ZeroRotator, GridToWorld(TileData.GridCoord), InstanceScale), true);
+	TileInstanceIndices.Add(TileData.GridCoord, InstanceIndex);
+
+	// Materials can read PerInstanceCustomData[0] to choose Minimal/Construct/Acid/Obstacle visuals.
+	ApplyTileInstanceCustomData(TileData.GridCoord, TileData.TileType);
 }
 
 bool AGridManager::IsValidCoord(FIntPoint Coord) const

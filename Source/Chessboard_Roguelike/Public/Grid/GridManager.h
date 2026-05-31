@@ -38,12 +38,22 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Grid")
 	TMap<FIntPoint, FTileData> Tiles;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Grid")
+	int32 CurrentWidth = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Grid")
+	int32 CurrentHeight = 0;
+
 	// Visual layers listen here to update only the changed tile after Construct/Acid consumption.
 	UPROPERTY(BlueprintAssignable, Category = "Grid|Events")
 	FOnTileTypeChanged OnTileTypeChanged;
 
 	UFUNCTION(BlueprintCallable, Category = "Grid")
 	void GenerateGrid();
+
+	// Applies a complete generated layout. Procedural systems should use this instead of mutating Tiles directly.
+	UFUNCTION(BlueprintCallable, Category = "Grid")
+	bool ApplyTileLayout(const TArray<FGridTileLayoutData>& TileLayout, int32 LayoutWidth, int32 LayoutHeight);
 
 	// Coordinate and occupancy helpers are intentionally collision/NavMesh free.
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Grid")
@@ -91,6 +101,14 @@ public:
 	bool RequestMove(AActor* Unit, FIntPoint FromCoord, FIntPoint ToCoord);
 
 private:
+	bool HasValidGridSettings() const;
+	void ClearGridState();
+	void BuildDefaultTileLayout(TArray<FGridTileLayoutData>& OutTileLayout) const;
+	void ApplyInitialTileOverrides(TArray<FGridTileLayoutData>& TileLayout) const;
+	void ApplyTileLayoutInternal(const TArray<FGridTileLayoutData>& TileLayout);
+	FTileData MakeTileDataFromLayout(const FGridTileLayoutData& LayoutData) const;
+	void RebuildTileVisuals();
+	void AddTileVisualInstance(const FTileData& TileData);
 	void ApplyTileInstanceCustomData(const FIntPoint& Coord, ETileType NewTileType);
 
 	UPROPERTY(VisibleAnywhere, Category = "Grid")

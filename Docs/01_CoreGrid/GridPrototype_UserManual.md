@@ -16,6 +16,12 @@
 - `Content/Blueprints/Core/BP_TurnManager.uasset`
 - `Content/Blueprints/Core/BP_GameMode_GridPrototype.uasset`
 
+主要 C++ PCG 类型：
+
+- `Source/Chessboard_Roguelike/Public/PCG/DungeonGenerationSettings.h`
+- `Source/Chessboard_Roguelike/Public/PCG/LSystemDungeonGenerator.h`
+- `Source/Chessboard_Roguelike/Public/PCG/DungeonRunManager.h`
+
 主要 DataAsset：
 
 - `Content/Data/Grid/DA_GridSettings_Prototype.uasset`
@@ -41,6 +47,31 @@
 6. Controller 通过 Enhanced Input 接收 WASD，转成 `FIntPoint` 方向后调用 Pawn 的 `TryMove()`。
 7. Pawn 请求 `GridManager::RequestMove()`，成功后更新逻辑坐标、步数、地块效果和视觉插值。
 
+## PCG 运行流程
+
+PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是让 Pawn 和敌人各自在 `BeginPlay()` 中抢先初始化。
+
+推荐流程：
+
+1. 关卡中放置 `BP_GridManager`、`BP_TurnManager`、玩家 Pawn，以及一个 `ADungeonRunManager` 派生蓝图或原生 Actor。
+2. 在 `DungeonRunManager` 上指定 `DungeonGenerationSettings`。
+3. 保持 `bAutoFindReferences = true`，或手动指定 `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`。
+4. 如果希望自动生成敌人，设置 `bSpawnEnemies = true`，并在 `DungeonGenerationSettings.EnemySpawnPool` 中配置敌人类型池。
+5. BeginPlay 时 `DungeonRunManager` 调用 `GenerateAndInitializeRun()`。
+6. `ULSystemDungeonGenerator` 生成 `FGeneratedDungeonLayout`。
+7. `GridManager->ApplyTileLayout(Layout.Tiles, Layout.Width, Layout.Height)` 应用生成结果。
+8. 玩家被初始化到 `Layout.StartCoord`。
+9. 可选敌人根据 `Layout.EnemySpawnCandidates` 生成并注册到 `EnemyManager`。
+10. `TurnManager` 切换到 `PlayerInput`。
+
+注意：
+
+- PCG 生成器只产出数据，不直接 Spawn Actor，也不直接修改 `GridManager.Tiles`。
+- `ADungeonRunManager` 会在运行开始前关闭玩家的自动网格初始化，避免玩家先占用手工起点。
+- 敌人使用 deferred spawn，并在生成前关闭 `bAutoInitializeOnBeginPlay`，避免敌人先占用默认 `StartGridCoord`。
+- 敌人类型不在 `DungeonRunManager` 上单独配置，而是从 `UDungeonGenerationSettings.EnemySpawnPool` 中按权重和深度筛选。
+- 当前 PCG 不依赖 UE PCG 插件；UE PCG Graph 后续更适合用于墙体、装饰和场景资产散布。
+
 ## GridSettings 配置
 
 类：`UGridSettings`
@@ -60,8 +91,11 @@
 
 - `GridCoord`: 要覆盖的格子坐标。
 - `TileType`: `Minimal`、`Construct`、`Acid`、`Obstacle`。
+- `CellRole`: 地图形态语义，当前支持 `Open`、`Room`、`Corridor`、`Wall`、`Start`、`Exit`。
 - `bWalkable`: 是否可通行；`Obstacle` 会强制不可通行。
 - `bConvertible`: 是否允许后续地块效果把该格转换为其他类型。
+- `RegionId`: 房间或区域编号，默认 `INDEX_NONE`。
+- `Depth`: 区域深度，可用于后续难度分层和房间激活。
 
 修改 `Width`、`Height`、`TileSize` 后，`GenerateGrid()` 会按新设置重建 `Tiles` 和 ISM 实例。
 
@@ -73,6 +107,9 @@
 
 - `GridCoord`: 逻辑坐标。角色真实位置以它为准。
 - `TileType`: 地块类型。
+- `CellRole`: 地图形态语义，用于区分房间、走廊、墙、起点和出口。
+- `RegionId`: 生成房间或区域 ID。
+- `Depth`: 生成深度或房间层级。
 - `OccupantType`: 占据类型。
 - `OccupantActor`: 当前占据 Actor。
 - `bWalkable`: 是否可通行。
@@ -84,6 +121,15 @@
 - `Construct`: 构成地块。
 - `Acid`: 酸性地块。
 - `Obstacle`: 障碍地块。
+
+地图形态 `EGridCellRole`：
+
+- `Open`: 普通开放格。
+- `Room`: 房间地面。
+- `Corridor`: 走廊地面。
+- `Wall`: 墙或不可通行边界。
+- `Start`: 起点区域。
+- `Exit`: 出口或目标区域。
 
 占据类型 `EGridOccupantType`：
 
@@ -103,11 +149,14 @@
 - `GridSettings`: 当前棋盘配置。
 - `TileISM`: 棋盘格视觉实例组件。
 - `Tiles`: `TMap<FIntPoint, FTileData>`，棋盘逻辑数据源。
+- `CurrentWidth`: 当前已生成布局宽度。
+- `CurrentHeight`: 当前已生成布局高度。
 - `OnTileTypeChanged`: 地块类型改变事件。
 
 常用函数：
 
 - `GenerateGrid()`: 按 `GridSettings` 重建棋盘数据和视觉实例。
+- `ApplyTileLayout(TileLayout, LayoutWidth, LayoutHeight)`: 应用完整生成布局，并重建 `Tiles` 与 ISM 视觉实例。
 - `IsValidCoord(Coord)`: 判断坐标是否在棋盘中。
 - `IsWalkable(Coord)`: 判断格子是否可通行。
 - `IsOccupied(Coord)`: 判断格子是否已被占据。
@@ -121,6 +170,71 @@
 - `RequestMove(Unit, FromCoord, ToCoord)`: 原子移动请求。
 - `GetTileInstanceIndex(Coord, OutInstanceIndex)`: 获取坐标对应的 ISM 实例下标。
 - `RefreshTileInstanceVisual(Coord, NewTileType)`: 蓝图可重写的视觉刷新钩子。
+
+`ApplyTileLayout()` 使用约定：
+
+- `TileLayout` 的元素类型为 `FGridTileLayoutData`。
+- PCG、关卡初始化器或调试工具应通过该入口写入整张地图，不应直接修改 `Tiles`。
+- `GridSettings` 仍需存在，并提供 `TileSize`、`Origin`、`TileMesh` 等坐标和视觉参数。
+- `Wall` 或 `Obstacle` 会被视为不可通行，并以 `Obstacle` 占据类型写入。
+- 应用成功后会清空旧格子、旧占据状态和旧 ISM 实例。
+
+## DungeonGenerationSettings 配置
+
+类：`UDungeonGenerationSettings`
+
+路径：`Source/Chessboard_Roguelike/Public/PCG/DungeonGenerationSettings.h`
+
+核心参数：
+
+- `Seed`: 地牢生成种子。
+- `Width` / `Height`: 生成布局尺寸。
+- `Axiom`: L-System 初始字符串。
+- `Iterations`: L-System 展开次数。
+- `ProductionRules`: L-System 生产规则，键为单字符名称，例如 `F`。
+- `MinRoomRadius` / `MaxRoomRadius`: 房间半径范围。
+- `MaxRoomCount`: 最大房间数量。
+- `BoundaryNoise`: 房间不规则边界扰动强度。
+- `CorridorWidth`: 走廊宽度。
+- `CorridorWanderChance`: 走廊崎岖偏移概率，范围 `0-100`。
+- `MaxGenerationAttempts`: 生成失败后的最大重试次数。
+- `StartSafetyRadius`: 起点安全区半径。
+- `ConstructTileChance`: 可通行格变为构成地块的概率。
+- `AcidTileChance`: 可通行格变为酸性地块的概率。
+- `EnemySpawnCount`: 敌人候选生成数量。
+- `EnemySpawnPool`: 敌人类型池。每项包含 `EnemyClass`、`Weight`、`MinDepth` 和 `MaxDepth`，运行时会按候选点深度筛选并按权重随机选择。
+- `EventCandidateCount`: 事件候选生成数量。
+- `RewardCandidateCount`: 奖励候选生成数量。
+
+L-System 符号：
+
+- `F`: 前进并创建房间。
+- `B`: 创建分支房间，当前等价于 `F`，预留给后续分支权重。
+- `E`: 创建出口候选房间，当前最终出口选择深度最高房间。
+- `R`: 保留当前房间节点。
+- `+`: 右转。
+- `-`: 左转。
+- `[`: 保存当前生成状态。
+- `]`: 恢复最近保存的生成状态。
+
+## 生成布局数据
+
+结构：`FGeneratedDungeonLayout`
+
+关键字段：
+
+- `Width` / `Height`: 生成结果尺寸。
+- `Seed`: 本次生成实际使用的种子。重试时会基于配置种子递增。
+- `Tiles`: `FGridTileLayoutData` 数组，可直接传入 `ApplyTileLayout()`。
+- `Rooms`: 生成房间节点。
+- `Connections`: 房间连接边和走廊路径。
+- `StartCoord`: 玩家出生坐标。
+- `ExitCoord`: 出口坐标。
+- `EnemySpawnCandidates`: 敌人出生候选点。
+- `EventSpawnCandidates`: 事件候选点。
+- `RewardSpawnCandidates`: 奖励候选点。
+
+`FDungeonSpawnCandidate` 包含 `Coord`、`RegionId` 和 `Depth`，用于后续刷怪、事件、奖励系统按区域和深度做筛选。
 
 `RequestMove()` 规则：
 

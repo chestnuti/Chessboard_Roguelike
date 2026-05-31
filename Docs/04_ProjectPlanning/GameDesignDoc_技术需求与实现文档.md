@@ -158,6 +158,60 @@
 - 两类地块覆盖率
 - 平均敌人可接触步数
 
+### 5.6 当前工程实现：L-System 地牢生成管线
+
+当前工程已经完成第一版可运行的 PCG 地图生成与运行时接入，重点是把“生成算法”“棋盘运行时数据”和“关卡初始化流程”分开：
+
+- `AGridManager` 仍然是运行时棋盘权威数据源，但不再只支持固定矩形默认生成。
+- `AGridManager::ApplyTileLayout(TileLayout, LayoutWidth, LayoutHeight)` 提供统一入口，用于把程序生成的布局写入 `Tiles` 并重建 ISM 视觉实例。
+- `FGridTileLayoutData` 是 PCG 到 GridManager 的轻量数据载体，生成器应输出该结构数组，而不是直接修改 `Tiles`。
+- `EGridCellRole` 用于描述地图形态语义，包括 `Open`、`Room`、`Corridor`、`Wall`、`Start`、`Exit`。它与 `ETileType` 分离，避免把房间/走廊/墙体语义混入构成、酸性、极简、障碍等地块属性。
+- `FTileData` 新增 `CellRole`、`RegionId`、`Depth`，用于记录房间节点、区域层级和后续房间激活/难度分层。
+- `UDungeonGenerationSettings` 是独立的地牢生成 DataAsset，承载 Seed、地图尺寸、L-System axiom/rules、迭代次数、房间半径、边界噪声、走廊宽度、崎岖概率、地块属性概率、出生候选数量、最大生成尝试次数和起点安全半径。
+- `ULSystemDungeonGenerator::GenerateDungeonLayout()` 负责根据配置生成 `FGeneratedDungeonLayout`，其中包含格子布局、房间节点、连接边、起点、出口和出生候选点。
+- `ULSystemDungeonGenerator::ValidateConnectivity()` 使用 Flood Fill 校验所有房间中心从起点可达。
+- `ADungeonRunManager::GenerateAndInitializeRun()` 是运行时接入口，执行“生成布局 -> 应用到 GridManager -> 初始化玩家 -> 可选生成敌人 -> 初始化 EnemyManager -> 设置 PlayerInput”。
+
+当前阶段不依赖 UE PCG 插件。原因是本项目的首要需求是回合制逻辑格、可达性保证和种子复现；UE PCG Graph 更适合后续生成墙体 Mesh、装饰和场景资产散布。
+
+#### 5.6.1 L-System 符号约定
+
+当前生成器支持以下符号：
+
+- `F`：向当前方向前进，并创建下一个房间节点。
+- `B`：创建分支房间节点，语义上等价于一次前进建房，保留给后续分支权重调参。
+- `E`：创建出口候选房间节点，当前最终出口仍选择深度最高房间。
+- `R`：保留当前房间节点，不前进；用于明确 axiom 中的房间语义。
+- `+`：向右旋转当前方向。
+- `-`：向左旋转当前方向。
+- `[`：保存当前 turtle 状态。
+- `]`：恢复最近保存的 turtle 状态。
+
+#### 5.6.2 生成阶段
+
+`ULSystemDungeonGenerator` 当前按以下阶段生成：
+
+1. `BuildRoomGraph`：展开 L-System 字符串，生成房间节点和连接关系。
+2. `RasterizeLayout`：把房间节点雕刻为不规则房间，把连接关系雕刻为崎岖走廊。
+3. `AssignTileTypes`：在可通行格上分配 `Minimal`、`Construct`、`Acid`，墙体固定为 `Obstacle`。
+4. `BuildSpawnCandidates`：生成敌人、事件、奖励候选点，避开起点安全区、墙、出口中心和不可通行格。
+5. `ValidateConnectivity`：从起点 Flood Fill，确保所有房间中心可达。
+
+生成器失败时会按 `MaxGenerationAttempts` 递增尝试种子重生成；所有随机路径必须使用 `FRandomStream`，禁止使用全局随机函数。
+
+#### 5.6.3 运行时接入
+
+`ADungeonRunManager` 用于在关卡中串联 PCG 与现有棋盘玩法：
+
+- `DungeonGenerationSettings`：地牢生成配置 DataAsset。
+- `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`：可手动指定，也可通过 `bAutoFindReferences` 自动查找。
+- `bGenerateOnBeginPlay`：BeginPlay 时自动生成并初始化。
+- `bInitializePlayer`：将玩家初始化到 `LastGeneratedLayout.StartCoord`。
+- `bSpawnEnemies`：根据 `EnemySpawnCandidates` 生成敌人；敌人类型从 `DungeonGenerationSettings.EnemySpawnPool` 中按深度筛选并按权重选择。
+- `LastGeneratedLayout`：保存最近一次生成结果，供蓝图调试和后续系统读取。
+
+敌人生成使用 deferred spawn，先关闭敌人的自动网格初始化，再调用 `InitializeOnGrid(GridManager, CandidateCoord)`，避免敌人先占用默认 `StartGridCoord`。
+
 ---
 
 ## 6. 玩家系统技术需求
@@ -415,6 +469,7 @@
 ### 11.1 核心枚举
 
 - `ETileType`：构成主义、酸性、极简主义、障碍、特殊
+- `EGridCellRole`：开放格、房间、走廊、墙、起点、出口
 - `EOccupantType`：空、玩家、敌人、物件
 - `EEnemyFaction`：构成主义、酸性
 - `EEnemyBehavior`：近战、远程
@@ -423,13 +478,19 @@
 
 ### 11.2 核心结构体
 
-- `FTileData`：地块类型、占据状态、坐标、可通行性、效果
+- `FTileData`：地块类型、地图形态语义、占据状态、坐标、可通行性、转换性、区域 ID、深度
+- `FGridTileLayoutData`：PCG 或手工布局写入 GridManager 前使用的轻量格子描述
+- `FLSystemDungeonRoomNode`：L-System 地牢房间节点，包含房间 ID、中心点、半径、深度和房间格子
+- `FLSystemDungeonConnection`：房间连接边，包含起止房间和走廊路径
+- `FDungeonSpawnCandidate`：生成后的候选出生/事件/奖励坐标，包含坐标、区域 ID 和深度
+- `FGeneratedDungeonLayout`：一次地牢生成的完整输出，包含尺寸、Seed、格子布局、房间、连接、起点、出口和候选点
 - `FPlayerState`：HP、构成值、酸性值、当前持有能量、位置
 - `FEnemyState`：阵营、行为类型、HP阈值、状态机、位置、是否压制
 - `FEnemyAttackDamage`：敌人对玩家造成的 HP 伤害、构成值变化、酸性值变化
 - `FEnemyAttackResolveResult`：敌人攻击玩家后的伤害是否生效、玩家是否失败、剩余 HP
 - `FTurnContext`：当前步数、动作来源、事件列表
-- `FPCGConfig`：种子、分区参数、噪声参数、连通性约束
+- `UDungeonGenerationSettings`：地牢生成 DataAsset，承载种子、L-System、房间、走廊和可达性约束
+- `ADungeonRunManager`：运行时 PCG 接入 Actor，负责生成布局、应用棋盘、初始化玩家和可选敌人
 
 ### 11.3 存档建议
 
