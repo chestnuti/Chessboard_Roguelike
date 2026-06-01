@@ -27,7 +27,8 @@
 4. 若相邻且未被压制，敌人先调用 `ApplyMeleeAttackDamage()` 完成数值结算，再触发 `ExecuteMeleeAttack()` 供蓝图播放表现。
 5. `ApplyMeleeAttackDamage()` 通过玩家 Pawn 上的 `UCombatResolverComponent::ResolveEnemyMeleeAttack()` 修改 `UPlayerAttributeComponent`。
 6. 默认近战造成 `AttackDamage` 点 HP 伤害，并可按敌人阵营额外扣减玩家对应属性值。
-7. 如果玩家 HP 降至 `0`，`AGridEnemyManager` 将 `ATurnManager` 状态设为 `Defeat`，并停止后续敌人行动。
+7. 如果玩家未被击败，敌人播放一次短距离前冲再回到原格的攻击表现，格子占据不变化。
+8. 如果玩家 HP 降至 `0`，敌人清空玩家格占据，移动进入玩家所在格，`AGridEnemyManager` 将 `ATurnManager` 状态设为 `Defeat`，并停止后续敌人行动。
 
 ## 攻击与退回规则
 
@@ -140,6 +141,12 @@
 默认 `ExecuteMeleeAttack()` 会调用 `ApplyMeleeAttackDamage()`，并输出攻击日志。默认 AI 已经在进入该事件前完成一次伤害结算，因此内部有防重复保护，避免蓝图调用 Parent 时重复扣血。
 
 如果蓝图只覆写 `ExecuteMeleeAttack`，且仍使用 C++ 默认 `ExecuteBasicTurn()`，伤害仍会在事件触发前结算。如果蓝图覆写了 `ExecuteBasicTurn()` 并完全绕过 Parent，那么需要显式调用 `ApplyMeleeAttackDamage()`，或调用 Parent `Execute Basic Turn`，否则只会播放自定义表现，不会造成数值效果。
+
+敌人攻击玩家的表现规则：
+
+- 未击败玩家时，敌人向玩家格方向前冲一小段距离，再回到原格。
+- 击败玩家时，敌人通过 `AGridManager::ClearOccupant()` 清空玩家格，再通过 `RequestMove()` 占据玩家所在格，并播放进入该格的移动插值。
+- 玩家失败后进入 `Defeat` 状态，敌人管理器不再继续执行后续敌人行动。
 
 ### 蓝图覆写 AI
 
@@ -428,6 +435,8 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 - 敌人默认基础 AI：相邻攻击，否则尝试靠近玩家。
 - 敌人移动视觉插值，移动期间敌方回合保持锁定。
 - 敌人默认近战会对玩家造成 HP 伤害。
+- 敌人攻击未击败玩家时前冲后退回原格。
+- 敌人击败玩家时占据玩家所在格。
 - 敌人可按阵营扣减玩家构成值或酸性值。
 - 玩家 HP 归零后进入 `Defeat` 回合状态。
 - 敌人近战伤害结果可通过 `OnMeleeAttackResolved` 供蓝图表现层使用。

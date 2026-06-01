@@ -71,7 +71,17 @@ void AGridEnemyPawn::Tick(float DeltaSeconds)
 
 	MoveElapsedTime += DeltaSeconds;
 	const float Alpha = FMath::Clamp(MoveElapsedTime / MoveDuration, 0.f, 1.f);
-	SetActorLocation(FMath::Lerp(VisualMoveFrom, VisualMoveTo, Alpha));
+	if (bIsAttackReboundVisualMove)
+	{
+		const float ReboundAlpha = Alpha < 0.5f ? Alpha * 2.f : (Alpha - 0.5f) * 2.f;
+		const FVector ReboundFrom = Alpha < 0.5f ? VisualMoveFrom : AttackReboundVisualPeak;
+		const FVector ReboundTo = Alpha < 0.5f ? AttackReboundVisualPeak : VisualMoveTo;
+		SetActorLocation(FMath::Lerp(ReboundFrom, ReboundTo, ReboundAlpha));
+	}
+	else
+	{
+		SetActorLocation(FMath::Lerp(VisualMoveFrom, VisualMoveTo, Alpha));
+	}
 
 	if (Alpha >= 1.f)
 	{
@@ -115,6 +125,7 @@ void AGridEnemyPawn::InitializeOnGrid(AGridManager* InGridManager, FIntPoint InS
 	CurrentGridCoord = InStartCoord;
 	SetActorLocation(GridManager->GridToWorld(CurrentGridCoord));
 	bIsMoving = false;
+	bIsAttackReboundVisualMove = false;
 	SetActorTickEnabled(false);
 	bDead = false;
 	bInitializedOnGrid = true;
@@ -248,7 +259,7 @@ void AGridEnemyPawn::ExecuteMeleeAttack_Implementation(AGridPawn* PlayerPawn)
 
 FEnemyAttackResolveResult AGridEnemyPawn::ApplyMeleeAttackDamage(AGridPawn* PlayerPawn)
 {
-	if (!CanAct() || !PlayerPawn)
+	if (!PlayerPawn)
 	{
 		return FEnemyAttackResolveResult();
 	}
@@ -257,6 +268,14 @@ FEnemyAttackResolveResult AGridEnemyPawn::ApplyMeleeAttackDamage(AGridPawn* Play
 	{
 		return LastMeleeAttackResult;
 	}
+
+	if (!CanAct())
+	{
+		return FEnemyAttackResolveResult();
+	}
+
+	const FVector FromLocation = GetActorLocation();
+	const FVector PlayerLocation = PlayerPawn->GetActorLocation();
 
 	UCombatResolverComponent* CombatResolver = PlayerPawn->CombatResolverComponent;
 	if (!CombatResolver)
@@ -278,6 +297,15 @@ FEnemyAttackResolveResult AGridEnemyPawn::ApplyMeleeAttackDamage(AGridPawn* Play
 	LastMeleeAttackResult = AttackResult;
 	bMeleeDamageResolvedInCurrentAttack = true;
 
+	if (AttackResult.bPlayerDefeated)
+	{
+		ResolveDefeatedPlayerOccupancy(PlayerPawn);
+	}
+	else if (AttackResult.bDamageApplied)
+	{
+		StartAttackReboundVisualMove(FromLocation, PlayerLocation);
+	}
+
 	OnMeleeAttackResolved(PlayerPawn, AttackResult);
 
 	return AttackResult;
@@ -294,6 +322,7 @@ void AGridEnemyPawn::Kill()
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
 	bIsMoving = false;
+	bIsAttackReboundVisualMove = false;
 	SetActorTickEnabled(false);
 	UE_LOG(LogGridEnemyPawn, Log, TEXT("%s killed."), *GetNameSafe(this));
 }
@@ -302,7 +331,9 @@ void AGridEnemyPawn::StartVisualMove(const FVector& From, const FVector& To)
 {
 	VisualMoveFrom = From;
 	VisualMoveTo = To;
+	AttackReboundVisualPeak = To;
 	MoveElapsedTime = 0.f;
+	bIsAttackReboundVisualMove = false;
 	bIsMoving = true;
 	SetActorLocation(VisualMoveFrom);
 	SetActorTickEnabled(true);
@@ -312,6 +343,50 @@ void AGridEnemyPawn::FinishVisualMove()
 {
 	SetActorLocation(VisualMoveTo);
 	bIsMoving = false;
+	bIsAttackReboundVisualMove = false;
 	MoveElapsedTime = 0.f;
 	SetActorTickEnabled(false);
+}
+
+void AGridEnemyPawn::StartAttackReboundVisualMove(const FVector& From, const FVector& BlockedTarget)
+{
+	VisualMoveFrom = From;
+	VisualMoveTo = From;
+	AttackReboundVisualPeak = FMath::Lerp(From, BlockedTarget, 0.35f);
+	MoveElapsedTime = 0.f;
+	bIsAttackReboundVisualMove = true;
+	bIsMoving = true;
+	SetActorLocation(VisualMoveFrom);
+	SetActorTickEnabled(true);
+}
+
+void AGridEnemyPawn::ResolveDefeatedPlayerOccupancy(AGridPawn* PlayerPawn)
+{
+	if (!GridManager || !PlayerPawn)
+	{
+		return;
+	}
+
+	const FIntPoint TargetCoord = PlayerPawn->CurrentGridCoord;
+	if (!GridManager->IsValidCoord(TargetCoord) || !GridManager->IsWalkable(TargetCoord))
+	{
+		UE_LOG(LogGridEnemyPawn, Warning, TEXT("%s cannot occupy defeated player coord (%d,%d): invalid or blocked target."),
+			*GetNameSafe(this), TargetCoord.X, TargetCoord.Y);
+		return;
+	}
+
+	const FVector FromLocation = GetActorLocation();
+	const FVector TargetLocation = GridManager->GridToWorld(TargetCoord);
+
+	GridManager->ClearOccupant(TargetCoord);
+	if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
+	{
+		UE_LOG(LogGridEnemyPawn, Warning, TEXT("%s defeated player but failed to move into (%d,%d)."),
+			*GetNameSafe(this), TargetCoord.X, TargetCoord.Y);
+		StartAttackReboundVisualMove(FromLocation, TargetLocation);
+		return;
+	}
+
+	CurrentGridCoord = TargetCoord;
+	StartVisualMove(FromLocation, TargetLocation);
 }

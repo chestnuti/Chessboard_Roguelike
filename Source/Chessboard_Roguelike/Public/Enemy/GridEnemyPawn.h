@@ -110,8 +110,13 @@ private:
 
 	FVector VisualMoveFrom = FVector::ZeroVector;
 	FVector VisualMoveTo = FVector::ZeroVector;
+	FVector AttackReboundVisualPeak = FVector::ZeroVector;
 	float MoveElapsedTime = 0.f;
+	bool bIsAttackReboundVisualMove = false;
 	bool bInitializedOnGrid = false;
 	bool bMeleeDamageResolvedInCurrentAttack = false;
 	FEnemyAttackResolveResult LastMeleeAttackResult;
+
+	void StartAttackReboundVisualMove(const FVector& From, const FVector& BlockedTarget);
+	void ResolveDefeatedPlayerOccupancy(AGridPawn* PlayerPawn);
 };

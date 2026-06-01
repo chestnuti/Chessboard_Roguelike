@@ -12,7 +12,7 @@
 2. 玩家视觉移动结束后，`AGridPawn` 调用 `ATurnManager::BeginEnemyTurn()`。
 3. `AGridEnemyManager::ExecuteEnemyTurn()` 遍历存活敌人。
 4. 每个敌人调用 `AGridEnemyPawn::ExecuteBasicTurn()`。该函数是 `BlueprintNativeEvent`，可由敌人蓝图覆写。
-5. 敌人若与玩家相邻，默认先结算近战伤害，再触发 `ExecuteMeleeAttack()` 供蓝图播放表现。
+5. 敌人若与玩家相邻，默认先结算近战伤害，再触发 `ExecuteMeleeAttack()` 供蓝图播放表现；未击败玩家时前冲后退回原格，击败玩家时占据玩家所在格。
 6. 敌人若不相邻，尝试沿曼哈顿距离靠近玩家一格；移动成功时立即更新逻辑占格，并播放短距离视觉插值。
 7. 若存在敌人正在播放移动插值，`AGridEnemyManager` 会保持 `EnemyTurnResolve`，等所有敌人移动完成后再结束敌方回合。
 8. 若玩家 HP 在敌方回合中降至 `0`，`ATurnManager` 进入 `Defeat`，敌人管理器停止后续敌人行动。
@@ -107,6 +107,8 @@ Source/Chessboard_Roguelike/Private/Enemy/GridEnemyManager.cpp
 - 与玩家曼哈顿距离为 `1` 时，触发近战攻击事件。
 - 相邻攻击会对玩家造成 `AttackDamage` 点 HP 伤害；默认值为 `1`。
 - 若敌人启用 `bApplyFactionAttributeDamage`，`Construct` 敌人会扣玩家构成值，`Acid` 敌人会扣玩家酸性值。
+- 未击败玩家时，敌人播放前冲并退回原格的攻击表现。
+- 击败玩家时，敌人清空玩家格占据并移动进入玩家所在格。
 - 玩家 HP 降至 `0` 时，本轮敌方回合立即中断并进入 `Defeat`。
 - 不相邻时，优先沿绝对距离更大的轴靠近玩家。
 - 如果优先方向被阻挡，尝试另一个轴。
@@ -123,6 +125,7 @@ Source/Chessboard_Roguelike/Private/Enemy/GridEnemyManager.cpp
 - 默认基础 AI 相邻攻击、非相邻靠近玩家。
 - 敌人移动视觉插值，以及移动完成前的敌方回合锁定。
 - 敌人近战对玩家造成 HP 伤害。
+- 敌人攻击未击败玩家时退回原格，击败玩家时占据玩家格。
 - 敌人近战可按阵营扣减玩家构成值或酸性值。
 - 玩家失败时进入 `Defeat` 并停止后续敌人行动。
 
