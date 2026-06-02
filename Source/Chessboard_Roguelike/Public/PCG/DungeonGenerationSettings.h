@@ -25,6 +25,14 @@ struct CHESSBOARD_ROGUELIKE_API FDungeonEnemySpawnEntry
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns", meta = (ClampMin = "0"))
 	int32 MaxDepth = 999;
+
+	// Optional base kill threshold for this enemy entry; 0 keeps the enemy Blueprint/class default.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns", meta = (ClampMin = "0"))
+	int32 KillThresholdOverride = 0;
+
+	// Added to the resolved base threshold for every room-depth step of the spawn candidate.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns", meta = (ClampMin = "0"))
+	int32 KillThresholdBonusPerDepth = 0;
 };
 
 UCLASS(BlueprintType)
@@ -65,6 +73,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Rooms", meta = (ClampMin = "0"))
 	int32 BoundaryNoise = 2;
+
+	// Extra center-distance padding used when placing new room nodes to reduce room overlap.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Rooms", meta = (ClampMin = "0"))
+	int32 RoomSeparation = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Corridors", meta = (ClampMin = "1"))
 	int32 CorridorWidth = 1;

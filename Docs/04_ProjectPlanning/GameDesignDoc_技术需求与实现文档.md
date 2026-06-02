@@ -167,7 +167,7 @@
 - `FGridTileLayoutData` 是 PCG 到 GridManager 的轻量数据载体，生成器应输出该结构数组，而不是直接修改 `Tiles`。
 - `EGridCellRole` 用于描述地图形态语义，包括 `Open`、`Room`、`Corridor`、`Wall`、`Start`、`Exit`。它与 `ETileType` 分离，避免把房间/走廊/墙体语义混入构成、酸性、极简、障碍等地块属性。
 - `FTileData` 新增 `CellRole`、`RegionId`、`Depth`，用于记录房间节点、区域层级和后续房间激活/难度分层。
-- `UDungeonGenerationSettings` 是独立的地牢生成 DataAsset，承载 Seed、地图尺寸、L-System axiom/rules、迭代次数、房间半径、边界噪声、走廊宽度、崎岖概率、地块属性概率、出生候选数量、最大生成尝试次数和起点安全半径。
+- `UDungeonGenerationSettings` 是独立的地牢生成 DataAsset，承载 Seed、地图尺寸、L-System axiom/rules、迭代次数、房间半径、边界噪声、房间间隔、走廊宽度、崎岖概率、地块属性概率、出生候选数量、最大生成尝试次数和起点安全半径。
 - `ULSystemDungeonGenerator::GenerateDungeonLayout()` 负责根据配置生成 `FGeneratedDungeonLayout`，其中包含格子布局、房间节点、连接边、起点、出口和出生候选点。
 - `ULSystemDungeonGenerator::ValidateConnectivity()` 使用 Flood Fill 校验所有房间中心从起点可达。
 - `ADungeonRunManager::GenerateAndInitializeRun()` 是运行时接入口，执行“生成布局 -> 应用到 GridManager -> 初始化玩家 -> 可选生成敌人 -> 初始化 EnemyManager -> 设置 PlayerInput”。
@@ -191,13 +191,15 @@
 
 `ULSystemDungeonGenerator` 当前按以下阶段生成：
 
-1. `BuildRoomGraph`：展开 L-System 字符串，生成房间节点和连接关系。
-2. `RasterizeLayout`：把房间节点雕刻为不规则房间，把连接关系雕刻为崎岖走廊。
+1. `BuildRoomGraph`：展开 L-System 字符串，生成房间节点和连接关系。新房间会按半径、`BoundaryNoise` 和 `RoomSeparation` 检查与已有房间的中心距离；如果多次尝试后仍找不到非重叠位置，该节点会被跳过。
+2. `RasterizeLayout`：把房间节点雕刻为不规则房间，把连接关系雕刻为崎岖走廊。房间格发生局部重叠时，Tile 优先保留较低 `Depth` 的房间归属；走廊不会覆盖已有房间、起点或出口的 `RegionId` 和 `Depth`。
 3. `AssignTileTypes`：在可通行格上分配 `Minimal`、`Construct`、`Acid`，墙体固定为 `Obstacle`。
 4. `BuildSpawnCandidates`：生成敌人、事件、奖励候选点，避开起点安全区、墙、出口中心和不可通行格。
 5. `ValidateConnectivity`：从起点 Flood Fill，确保所有房间中心可达。
 
 生成器失败时会按 `MaxGenerationAttempts` 递增尝试种子重生成；所有随机路径必须使用 `FRandomStream`，禁止使用全局随机函数。
+
+该深度归属规则用于避免抽象 L-System 深层房间在边界夹取或分支回绕后覆盖近起点房间，导致同一个视觉房间内出现高低混杂的 `Depth`。
 
 #### 5.6.3 运行时接入
 
@@ -207,10 +209,26 @@
 - `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`：可手动指定，也可通过 `bAutoFindReferences` 自动查找。
 - `bGenerateOnBeginPlay`：BeginPlay 时自动生成并初始化。
 - `bInitializePlayer`：将玩家初始化到 `LastGeneratedLayout.StartCoord`。
-- `bSpawnEnemies`：根据 `EnemySpawnCandidates` 生成敌人；敌人类型从 `DungeonGenerationSettings.EnemySpawnPool` 中按深度筛选并按权重选择。
+- `bSpawnEnemies`：根据 `EnemySpawnCandidates` 生成敌人；敌人类型从 `DungeonGenerationSettings.EnemySpawnPool` 中按深度筛选并按权重选择，生成后按池条目的阈值规则写入敌人 `KillThreshold`。
 - `LastGeneratedLayout`：保存最近一次生成结果，供蓝图调试和后续系统读取。
 
-敌人生成使用 deferred spawn，先关闭敌人的自动网格初始化，再调用 `InitializeOnGrid(GridManager, CandidateCoord)`，避免敌人先占用默认 `StartGridCoord`。
+敌人生成使用 deferred spawn，先关闭敌人的自动网格初始化，再根据候选点深度计算 `KillThreshold`，最后调用 `InitializeOnGrid(GridManager, CandidateCoord)`，避免敌人先占用默认 `StartGridCoord`。
+
+`EnemySpawnPool` 单项字段：
+
+- `EnemyClass`：被生成的敌人 Pawn 类。
+- `Weight`：同一候选深度下的相对抽取权重。
+- `MinDepth` / `MaxDepth`：该敌人类型允许出现的候选深度范围。
+- `KillThresholdOverride`：大于 `0` 时覆盖敌人类默认击杀阈值；等于 `0` 时保留敌人蓝图或 C++ 默认值。
+- `KillThresholdBonusPerDepth`：按候选点 `Depth` 累加的击杀阈值加成。
+
+最终敌人击杀阈值公式：
+
+```text
+FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdBonusPerDepth)
+```
+
+其中 `BaseKillThreshold` 优先取 `KillThresholdOverride`，未配置覆盖时取敌人实例自身的 `KillThreshold`。
 
 ---
 
@@ -345,7 +363,7 @@
 - 蓄力状态
 - 当前目标
 - 是否处于压制状态
-- HP 阈值随房间深度递增，越靠后的房间敌人越强
+- HP 阈值可由 `EnemySpawnPool` 单项配置随房间深度递增；不同敌人类型可以有不同基础阈值和深度成长值。
 
 ### 8.3 敌人行动规则
 
@@ -418,6 +436,7 @@
 - 转换能量应作为独立资源对象管理
 - 使用前仅需检查是否持有能量，无需管理队列
 - 地块转换应走统一的地图修改接口，确保同步 UI、可达性与 VFX
+- PCG 起点区域 `Start` 保持 `Minimal`，但允许转换；出口 `Exit` 和墙体/障碍仍不可转换。
 
 ### 9.5 风险点
 
@@ -644,7 +663,7 @@
 
 - 玩家因障碍或墙体导致的移动失败不消耗步数；玩家主动向敌人格移动但未击杀目标时，消耗步数并退回原格。
 - 目标格已有敌人时仅触发攻击，不允许穿越。
-- 敌人 HP 阈值随房间深度递增，越靠后的房间敌人越强。
+- 敌人 HP 阈值通过 `EnemySpawnPool` 单项配置与候选点深度计算，越靠后的房间可以生成更高 `KillThreshold` 的敌人。
 - 远程敌人采用四向直线范围攻击，若玩家不在攻击线内则追逐玩家。
 - 地块转换不会覆盖障碍物与特殊事件。
 - 压制状态与免疫效果可叠加，被压制敌人仍保持对应免疫。

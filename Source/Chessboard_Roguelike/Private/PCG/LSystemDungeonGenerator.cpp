@@ -40,6 +40,33 @@ namespace
 			FMath::Clamp(Coord.Y, Padding, FMath::Max(Padding, Settings.Height - Padding - 1)));
 	}
 
+	int32 MakeRoomRadius(const UDungeonGenerationSettings& Settings, FRandomStream& Stream)
+	{
+		return Stream.RandRange(Settings.MinRoomRadius, FMath::Max(Settings.MinRoomRadius, Settings.MaxRoomRadius));
+	}
+
+	bool IsRoomPlacementClear(
+		const FGeneratedDungeonLayout& Layout,
+		const UDungeonGenerationSettings& Settings,
+		const FIntPoint& Center,
+		int32 Radius)
+	{
+		const int32 Clearance = FMath::Max(0, Settings.BoundaryNoise + Settings.RoomSeparation);
+		for (const FLSystemDungeonRoomNode& ExistingRoom : Layout.Rooms)
+		{
+			const float Distance = FVector2D(
+				static_cast<float>(Center.X - ExistingRoom.Center.X),
+				static_cast<float>(Center.Y - ExistingRoom.Center.Y)).Length();
+			const float MinimumDistance = static_cast<float>(ExistingRoom.ApproxRadius + Radius + Clearance);
+			if (Distance < MinimumDistance)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
 	FString ExpandLSystem(const UDungeonGenerationSettings& Settings)
 	{
 		FString Expanded = Settings.Axiom;
@@ -95,12 +122,12 @@ namespace
 		}
 	}
 
-	int32 AddRoomNode(FGeneratedDungeonLayout& Layout, const UDungeonGenerationSettings& Settings, FRandomStream& Stream, const FIntPoint& Center, int32 Depth)
+	int32 AddRoomNode(FGeneratedDungeonLayout& Layout, const UDungeonGenerationSettings& Settings, const FIntPoint& Center, int32 Depth, int32 Radius)
 	{
 		FLSystemDungeonRoomNode Room;
 		Room.RoomId = Layout.Rooms.Num();
 		Room.Center = ClampRoomCenter(Center, Settings);
-		Room.ApproxRadius = Stream.RandRange(Settings.MinRoomRadius, FMath::Max(Settings.MinRoomRadius, Settings.MaxRoomRadius));
+		Room.ApproxRadius = Radius;
 		Room.Depth = Depth;
 		Layout.Rooms.Add(Room);
 		return Room.RoomId;
@@ -108,26 +135,46 @@ namespace
 
 	int32 AdvanceAndAddRoom(FGeneratedDungeonLayout& Layout, const UDungeonGenerationSettings& Settings, FRandomStream& Stream, FTurtleState& Turtle)
 	{
-		const int32 StepDistance = Stream.RandRange(Settings.MaxRoomRadius * 2 + 2, Settings.MaxRoomRadius * 3 + 4);
 		const FIntPoint Perpendicular = RotateRight(Turtle.Direction);
-		const FIntPoint ForwardStep(Turtle.Direction.X * StepDistance, Turtle.Direction.Y * StepDistance);
-		const FIntPoint Jitter(Perpendicular.X * Stream.RandRange(-2, 2), Perpendicular.Y * Stream.RandRange(-2, 2));
-		const FIntPoint NextCenter = ClampRoomCenter(Turtle.Coord + ForwardStep + Jitter, Settings);
-
 		const int32 PreviousRoomId = Turtle.RoomId;
-		const int32 NextRoomId = AddRoomNode(Layout, Settings, Stream, NextCenter, Turtle.Depth + 1);
-		if (Layout.Rooms.IsValidIndex(PreviousRoomId))
+		const int32 CandidateRadius = MakeRoomRadius(Settings, Stream);
+		const int32 BaseMinStepDistance = Settings.MaxRoomRadius * 2 + 2;
+		const int32 BaseMaxStepDistance = Settings.MaxRoomRadius * 3 + 4;
+		constexpr int32 MaxPlacementAttempts = 24;
+
+		for (int32 Attempt = 0; Attempt < MaxPlacementAttempts; ++Attempt)
 		{
-			FLSystemDungeonConnection Connection;
-			Connection.FromRoomId = PreviousRoomId;
-			Connection.ToRoomId = NextRoomId;
-			Layout.Connections.Add(Connection);
+			const int32 StepDistance = Stream.RandRange(BaseMinStepDistance, BaseMaxStepDistance + Attempt * FMath::Max(1, Settings.MaxRoomRadius));
+			const int32 JitterRange = 2 + Attempt;
+			const FIntPoint ForwardStep(Turtle.Direction.X * StepDistance, Turtle.Direction.Y * StepDistance);
+			const FIntPoint Jitter(
+				Perpendicular.X * Stream.RandRange(-JitterRange, JitterRange),
+				Perpendicular.Y * Stream.RandRange(-JitterRange, JitterRange));
+			const FIntPoint NextCenter = ClampRoomCenter(Turtle.Coord + ForwardStep + Jitter, Settings);
+
+			if (!IsRoomPlacementClear(Layout, Settings, NextCenter, CandidateRadius))
+			{
+				continue;
+			}
+
+			const int32 NextRoomId = AddRoomNode(Layout, Settings, NextCenter, Turtle.Depth + 1, CandidateRadius);
+			if (Layout.Rooms.IsValidIndex(PreviousRoomId))
+			{
+				FLSystemDungeonConnection Connection;
+				Connection.FromRoomId = PreviousRoomId;
+				Connection.ToRoomId = NextRoomId;
+				Layout.Connections.Add(Connection);
+			}
+
+			Turtle.Coord = Layout.Rooms[NextRoomId].Center;
+			Turtle.RoomId = NextRoomId;
+			Turtle.Depth = Layout.Rooms[NextRoomId].Depth;
+			return NextRoomId;
 		}
 
-		Turtle.Coord = Layout.Rooms[NextRoomId].Center;
-		Turtle.RoomId = NextRoomId;
-		++Turtle.Depth;
-		return NextRoomId;
+		UE_LOG(LogLSystemDungeonGenerator, Verbose, TEXT("Skipped room at depth %d: no non-overlapping placement found after %d attempts."),
+			Turtle.Depth + 1, MaxPlacementAttempts);
+		return INDEX_NONE;
 	}
 
 	bool BuildRoomGraph(const UDungeonGenerationSettings& Settings, FRandomStream& Stream, FGeneratedDungeonLayout& Layout)
@@ -140,7 +187,7 @@ namespace
 
 		FTurtleState Turtle;
 		Turtle.Coord = FIntPoint(Settings.Width / 2, Settings.Height / 2);
-		Turtle.RoomId = AddRoomNode(Layout, Settings, Stream, Turtle.Coord, 0);
+		Turtle.RoomId = AddRoomNode(Layout, Settings, Turtle.Coord, 0, MakeRoomRadius(Settings, Stream));
 		Layout.StartCoord = Layout.Rooms[Turtle.RoomId].Center;
 
 		TArray<FTurtleState> Stack;
@@ -159,7 +206,11 @@ namespace
 			case TCHAR('R'):
 				if (Turtle.RoomId == INDEX_NONE)
 				{
-					Turtle.RoomId = AddRoomNode(Layout, Settings, Stream, Turtle.Coord, Turtle.Depth);
+					const int32 CandidateRadius = MakeRoomRadius(Settings, Stream);
+					if (IsRoomPlacementClear(Layout, Settings, Turtle.Coord, CandidateRadius))
+					{
+						Turtle.RoomId = AddRoomNode(Layout, Settings, Turtle.Coord, Turtle.Depth, CandidateRadius);
+					}
 				}
 				break;
 			case TCHAR('+'):
@@ -200,11 +251,11 @@ namespace
 		return Layout.Rooms.Num() > 0;
 	}
 
-	void StampTile(FGeneratedDungeonLayout& Layout, const FIntPoint& Coord, EGridCellRole Role, int32 RegionId, int32 Depth)
+	bool StampTile(FGeneratedDungeonLayout& Layout, const FIntPoint& Coord, EGridCellRole Role, int32 RegionId, int32 Depth)
 	{
 		if (!IsInBounds(Coord, Layout.Width, Layout.Height))
 		{
-			return;
+			return false;
 		}
 
 		FGridTileLayoutData& Tile = Layout.Tiles[GetTileIndex(Coord, Layout.Width)];
@@ -213,7 +264,23 @@ namespace
 			&& (Tile.CellRole == EGridCellRole::Room || Tile.CellRole == EGridCellRole::Start || Tile.CellRole == EGridCellRole::Exit))
 		{
 			Tile.bWalkable = true;
-			return;
+			return false;
+		}
+
+		// When room masks overlap, keep the lower-depth ownership so deep clamped rooms cannot pollute early areas.
+		if (Role == EGridCellRole::Room)
+		{
+			if (Tile.CellRole == EGridCellRole::Start || Tile.CellRole == EGridCellRole::Exit)
+			{
+				Tile.bWalkable = true;
+				return false;
+			}
+
+			if (Tile.CellRole == EGridCellRole::Room && Tile.Depth <= Depth)
+			{
+				Tile.bWalkable = true;
+				return false;
+			}
 		}
 
 		Tile.TileType = ETileType::Minimal;
@@ -222,6 +289,7 @@ namespace
 		Tile.bConvertible = true;
 		Tile.RegionId = RegionId;
 		Tile.Depth = Depth;
+		return true;
 	}
 
 	void StampBrush(FGeneratedDungeonLayout& Layout, const FIntPoint& Center, int32 Radius, EGridCellRole Role, int32 RegionId, int32 Depth)
@@ -256,8 +324,10 @@ namespace
 				const int32 BoundaryOffset = Stream.RandRange(-Settings.BoundaryNoise, Settings.BoundaryNoise);
 				if (Distance <= static_cast<float>(Room.ApproxRadius + BoundaryOffset))
 				{
-					StampTile(Layout, Coord, Role, Room.RoomId, Room.Depth);
-					Room.Tiles.Add(Coord);
+					if (StampTile(Layout, Coord, Role, Room.RoomId, Room.Depth))
+					{
+						Room.Tiles.Add(Coord);
+					}
 				}
 			}
 		}
@@ -379,7 +449,14 @@ namespace
 				continue;
 			}
 
-			if (Tile.CellRole == EGridCellRole::Start || Tile.CellRole == EGridCellRole::Exit)
+			if (Tile.CellRole == EGridCellRole::Start)
+			{
+				Tile.TileType = ETileType::Minimal;
+				Tile.bConvertible = true;
+				continue;
+			}
+
+			if (Tile.CellRole == EGridCellRole::Exit)
 			{
 				Tile.TileType = ETileType::Minimal;
 				Tile.bConvertible = false;

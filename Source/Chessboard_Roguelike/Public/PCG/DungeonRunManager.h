@@ -11,6 +11,7 @@ class AGridManager;
 class AGridPawn;
 class ATurnManager;
 class UDungeonGenerationSettings;
+struct FDungeonEnemySpawnEntry;
 
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API ADungeonRunManager : public AActor
@@ -65,6 +66,10 @@ private:
 	bool ApplyGeneratedLayout();
 	bool InitializePlayerFromLayout();
 	void SpawnEnemiesFromLayout();
-	TSubclassOf<AGridEnemyPawn> SelectEnemyClassForCandidate(const FDungeonSpawnCandidate& Candidate, FRandomStream& Stream) const;
+	const FDungeonEnemySpawnEntry* SelectEnemySpawnEntryForCandidate(const FDungeonSpawnCandidate& Candidate, FRandomStream& Stream) const;
+	int32 CalculateEnemyKillThresholdForCandidate(
+		const AGridEnemyPawn* Enemy,
+		const FDungeonSpawnCandidate& Candidate,
+		const FDungeonEnemySpawnEntry& SpawnEntry) const;
 	void RegisterEnemyWithManager(AGridEnemyPawn* Enemy) const;
 };

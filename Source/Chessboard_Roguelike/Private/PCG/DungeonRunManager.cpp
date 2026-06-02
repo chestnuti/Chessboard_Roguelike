@@ -187,8 +187,8 @@ void ADungeonRunManager::SpawnEnemiesFromLayout()
 			continue;
 		}
 
-		const TSubclassOf<AGridEnemyPawn> SelectedEnemyClass = SelectEnemyClassForCandidate(Candidate, SpawnStream);
-		if (!SelectedEnemyClass)
+		const FDungeonEnemySpawnEntry* SelectedSpawnEntry = SelectEnemySpawnEntryForCandidate(Candidate, SpawnStream);
+		if (!SelectedSpawnEntry)
 		{
 			UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnEnemiesFromLayout skipped candidate (%d,%d): no valid enemy class for depth %d."),
 				Candidate.Coord.X, Candidate.Coord.Y, Candidate.Depth);
@@ -198,7 +198,7 @@ void ADungeonRunManager::SpawnEnemiesFromLayout()
 		const FTransform SpawnTransform(FRotator::ZeroRotator, GridManager->GridToWorld(Candidate.Coord));
 		// Deferred spawn lets us disable the enemy's automatic grid initialization before BeginPlay runs.
 		AGridEnemyPawn* Enemy = GetWorld()->SpawnActorDeferred<AGridEnemyPawn>(
-			SelectedEnemyClass,
+			SelectedSpawnEntry->EnemyClass,
 			SpawnTransform,
 			this,
 			nullptr,
@@ -212,12 +212,15 @@ void ADungeonRunManager::SpawnEnemiesFromLayout()
 
 		Enemy->bAutoInitializeOnBeginPlay = false;
 		Enemy->FinishSpawning(SpawnTransform);
+		Enemy->KillThreshold = CalculateEnemyKillThresholdForCandidate(Enemy, Candidate, *SelectedSpawnEntry);
 		Enemy->InitializeOnGrid(GridManager, Candidate.Coord);
 		RegisterEnemyWithManager(Enemy);
 	}
 }
 
-TSubclassOf<AGridEnemyPawn> ADungeonRunManager::SelectEnemyClassForCandidate(const FDungeonSpawnCandidate& Candidate, FRandomStream& Stream) const
+const FDungeonEnemySpawnEntry* ADungeonRunManager::SelectEnemySpawnEntryForCandidate(
+	const FDungeonSpawnCandidate& Candidate,
+	FRandomStream& Stream) const
 {
 	if (!DungeonGenerationSettings)
 	{
@@ -263,11 +266,23 @@ TSubclassOf<AGridEnemyPawn> ADungeonRunManager::SelectEnemyClassForCandidate(con
 		Roll -= Entry.Weight;
 		if (Roll <= 0)
 		{
-			return Entry.EnemyClass;
+			return &Entry;
 		}
 	}
 
 	return nullptr;
+}
+
+int32 ADungeonRunManager::CalculateEnemyKillThresholdForCandidate(
+	const AGridEnemyPawn* Enemy,
+	const FDungeonSpawnCandidate& Candidate,
+	const FDungeonEnemySpawnEntry& SpawnEntry) const
+{
+	const int32 BaseThreshold = SpawnEntry.KillThresholdOverride > 0
+		? SpawnEntry.KillThresholdOverride
+		: (Enemy ? Enemy->KillThreshold : 1);
+	const int32 DepthBonus = FMath::Max(0, Candidate.Depth) * FMath::Max(0, SpawnEntry.KillThresholdBonusPerDepth);
+	return FMath::Max(1, BaseThreshold + DepthBonus);
 }
 
 void ADungeonRunManager::RegisterEnemyWithManager(AGridEnemyPawn* Enemy) const

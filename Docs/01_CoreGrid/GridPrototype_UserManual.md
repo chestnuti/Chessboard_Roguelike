@@ -69,7 +69,7 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - PCG 生成器只产出数据，不直接 Spawn Actor，也不直接修改 `GridManager.Tiles`。
 - `ADungeonRunManager` 会在运行开始前关闭玩家的自动网格初始化，避免玩家先占用手工起点。
 - 敌人使用 deferred spawn，并在生成前关闭 `bAutoInitializeOnBeginPlay`，避免敌人先占用默认 `StartGridCoord`。
-- 敌人类型不在 `DungeonRunManager` 上单独配置，而是从 `UDungeonGenerationSettings.EnemySpawnPool` 中按权重和深度筛选。
+- 敌人类型不在 `DungeonRunManager` 上单独配置，而是从 `UDungeonGenerationSettings.EnemySpawnPool` 中按权重和深度筛选；池条目还可以按候选点深度调整敌人的 `KillThreshold`。
 - 当前 PCG 不依赖 UE PCG 插件；UE PCG Graph 后续更适合用于墙体、装饰和场景资产散布。
 
 ## GridSettings 配置
@@ -128,8 +128,8 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `Room`: 房间地面。
 - `Corridor`: 走廊地面。
 - `Wall`: 墙或不可通行边界。
-- `Start`: 起点区域。
-- `Exit`: 出口或目标区域。
+- `Start`: 起点区域。PCG 生成时保持 `Minimal`，且允许被地块转换能量转换。
+- `Exit`: 出口或目标区域。PCG 生成时保持 `Minimal`，但不允许被地块转换能量转换。
 
 占据类型 `EGridOccupantType`：
 
@@ -195,6 +195,7 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `MinRoomRadius` / `MaxRoomRadius`: 房间半径范围。
 - `MaxRoomCount`: 最大房间数量。
 - `BoundaryNoise`: 房间不规则边界扰动强度。
+- `RoomSeparation`: 房间放置时额外保留的中心距离间隔，用于减少不同房间重叠。
 - `CorridorWidth`: 走廊宽度。
 - `CorridorWanderChance`: 走廊崎岖偏移概率，范围 `0-100`。
 - `MaxGenerationAttempts`: 生成失败后的最大重试次数。
@@ -202,9 +203,25 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `ConstructTileChance`: 可通行格变为构成地块的概率。
 - `AcidTileChance`: 可通行格变为酸性地块的概率。
 - `EnemySpawnCount`: 敌人候选生成数量。
-- `EnemySpawnPool`: 敌人类型池。每项包含 `EnemyClass`、`Weight`、`MinDepth` 和 `MaxDepth`，运行时会按候选点深度筛选并按权重随机选择。
+- `EnemySpawnPool`: 敌人类型池。每项包含 `EnemyClass`、`Weight`、`MinDepth`、`MaxDepth`、`KillThresholdOverride` 和 `KillThresholdBonusPerDepth`，运行时会按候选点深度筛选并按权重随机选择。
 - `EventCandidateCount`: 事件候选生成数量。
 - `RewardCandidateCount`: 奖励候选生成数量。
+
+敌人池条目的 HP 阈值规则：
+
+- `KillThresholdOverride = 0` 时，保留敌人蓝图或 C++ 类默认的 `KillThreshold`。
+- `KillThresholdOverride > 0` 时，使用该值作为该池条目的基础 `KillThreshold`。
+- `KillThresholdBonusPerDepth` 会按候选点 `Depth` 叠加到基础阈值上。
+- 最终公式为 `FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdBonusPerDepth)`。
+- 该数值在 `ADungeonRunManager::SpawnEnemiesFromLayout()` 中，敌人 deferred spawn 完成后、`InitializeOnGrid()` 前写入敌人实例。
+
+房间深度一致性规则：
+
+- 新房间节点会在当前方向上多次尝试寻找不与已有房间重叠的位置。
+- 重叠检测使用已有房间半径、新房间半径、`BoundaryNoise` 和 `RoomSeparation` 计算最小中心距离。
+- 如果多次尝试后仍找不到合适位置，该房间节点会被跳过，不会强行夹回已有房间附近。
+- 栅格化时如果两个房间仍有局部重叠，Tile 会优先保留较低 `Depth` 的房间归属，避免深层房间污染起点附近区域。
+- 走廊仍可连接房间，但不会覆盖已有 `Room`、`Start`、`Exit` 的 `RegionId` 和 `Depth`。
 
 L-System 符号：
 
