@@ -1,6 +1,6 @@
 # 近战攻击与敌人阈值击杀系统说明
 
-本文档说明任务 5、6、7 中与战斗结算相关功能的实现方式、可在蓝图中调用或修改的事件、值、参数，以及当前战斗系统与网格、地块属性系统之间的边界。该系统处理玩家主动向敌人格移动时触发的近战攻击、敌人免疫、单次阈值击杀、未击杀退回，以及敌人在敌方回合中对玩家造成的基础近战伤害。敌方回合调度和基础 AI 已拆分到 `AGridEnemyManager`，详见 [EnemyManager_SystemGuide.md](EnemyManager_SystemGuide.md)。本文不包含友伤、地块转换能量、远程攻击、PCG 或多房间逻辑。
+本文档说明任务 5、6、7 以及跨阵营友伤基础结算中与战斗结算相关功能的实现方式、可在蓝图中调用或修改的事件、值、参数，以及当前战斗系统与网格、地块属性系统之间的边界。该系统处理玩家主动向敌人格移动时触发的近战攻击、敌人免疫、单次阈值击杀、未击杀退回、敌人在敌方回合中对玩家造成的基础伤害、远程敌人瞄准与攻击线结算，以及敌人之间的跨阵营近战冲突和远程友伤结算入口。敌方回合调度和基础 AI 已拆分到 `AGridEnemyManager`，详见 [EnemyManager_SystemGuide.md](EnemyManager_SystemGuide.md)。本文不包含地块转换能量、PCG 或多房间逻辑。
 
 ## 功能流程
 
@@ -29,6 +29,15 @@
 6. 默认近战造成 `AttackDamage` 点 HP 伤害，并可按敌人阵营额外扣减玩家对应属性值。
 7. 如果玩家未被击败，敌人播放一次短距离前冲再回到原格的攻击表现，格子占据不变化。
 8. 如果玩家 HP 降至 `0`，敌人清空玩家格占据，移动进入玩家所在格，`AGridEnemyManager` 将 `ATurnManager` 状态设为 `Defeat`，并停止后续敌人行动。
+
+敌人跨阵营友伤的流程如下：
+
+1. 敌人移动仍从 `AGridEnemyPawn::TryMoveToGridCoord()` 进入。
+2. 如果目标格被另一名 `AGridEnemyPawn` 占据，敌人不会直接调用 `AGridManager::RequestMove()`，而是先调用 `UCombatResolverComponent::ResolveEnemyMeleeCollision()`。
+3. 同阵营敌人不会造成友伤，移动失败且不改变占据。
+4. 不同阵营敌人按目标格地块类型结算死亡结果：`Construct` 地块击杀酸性敌人，`Acid` 地块击杀构成敌人，`Minimal` 地块击杀 `KillThreshold` 较低者，阈值相同则双方死亡。
+5. `AGridEnemyPawn` 根据结算结果调用 `Kill()` 并清空对应格子的占据；如果目标死亡且攻击者存活，攻击者会再通过 `RequestMove()` 进入目标格。
+6. 远程敌人后续射线命中敌人时可直接调用 `ApplyRangedFriendlyFireDamage()`；该函数内部使用 `ResolveEnemyRangedFriendlyFire()`，异阵营目标直接死亡，同阵营不受影响。
 
 ## 攻击与退回规则
 
@@ -68,7 +77,7 @@
 | 值 | 含义 | 当前阶段用途 |
 | --- | --- | --- |
 | `Melee` | 近战敌人 | 当前默认基础 AI 可使用 |
-| `Ranged` | 远程敌人 | 为后续远程敌人逻辑预留 |
+| `Ranged` | 远程敌人 | 使用两阶段瞄准/开火逻辑，并优先移动到与玩家同 X/Y 轴的位置 |
 
 当前玩家近战判定只使用敌人阵营和击杀阈值，`BehaviorType` 不参与玩家攻击结算。敌方回合 AI 可在 `ExecuteBasicTurn()` 的蓝图覆写中读取 `BehaviorType` 并自行分发逻辑。
 
@@ -98,6 +107,7 @@
 | `AttackDamage` | `int32` | `1` | 敌人近战命中玩家时造成的 HP 伤害 |
 | `AttackAttributeDamage` | `int32` | `1` | 启用阵营属性伤害时，对玩家对应属性值造成的扣减量 |
 | `bApplyFactionAttributeDamage` | `bool` | `true` | 是否让 `Construct` 敌人扣构成值、`Acid` 敌人扣酸性值 |
+| `MaxRangedAttackDistance` | `int32` | `0` | 远程攻击最大延伸格数；`0` 表示直到地图边界或 Obstacle |
 | `MoveDuration` | `float` | `0.15` | 敌人移动视觉插值时长；逻辑占格仍在移动成功时立即更新 |
 | `StartGridCoord` | `FIntPoint` | `(1, 0)` | 自动初始化时占据的格子 |
 | `bAutoInitializeOnBeginPlay` | `bool` | `true` | 是否在 BeginPlay 自动查找 GridManager 并占格 |
@@ -112,6 +122,9 @@
 | `bDead` | `bool` | 是否已死亡 |
 | `bIsMoving` | `bool` | 是否正在播放移动视觉插值 |
 | `GridManager` | `AGridManager*` | 当前使用的棋盘管理器 |
+| `ActionState` | `EEnemyActionState` | 当前敌人行动状态；远程瞄准时为 `AimingRangedAttack` |
+| `PendingRangedAttackTiles` | `TArray<FIntPoint>` | 上一回合锁定、下一次敌方回合开始时结算的远程攻击线 |
+| `PendingRangedAttackDirection` | `FIntPoint` | 远程攻击线方向 |
 
 ### 蓝图可调用函数
 
@@ -121,12 +134,22 @@
 | `CanReceiveDamage` | 无 | `bool` | 返回敌人是否仍可受击，当前等价于 `!bDead` |
 | `IsAlive` | 无 | `bool` | 返回敌人是否存活，当前等价于 `!bDead` |
 | `CanAct` | 无 | `bool` | 返回敌人是否可行动，当前要求存活且拥有 `GridManager` |
-| `TryMoveToGridCoord` | `TargetCoord` | `bool` | 通过 `AGridManager::RequestMove()` 尝试移动到目标格；成功后更新逻辑坐标并播放视觉插值 |
+| `TryMoveToGridCoord` | `TargetCoord` | `bool` | 尝试移动到目标格；目标为空时走 `AGridManager::RequestMove()`，目标为敌人时先结算跨阵营近战冲突 |
 | `ExecuteBasicTurn` | `PlayerPawn` | `bool` | `BlueprintNativeEvent`。完整敌人行动入口，可在蓝图覆写 |
 | `ExecuteMeleeAttack` | `PlayerPawn` | 无 | `BlueprintNativeEvent`。近战攻击表现入口，可在蓝图覆写 |
 | `ApplyMeleeAttackDamage` | `PlayerPawn` | `FEnemyAttackResolveResult` | 对玩家应用敌人近战伤害。默认 AI 会在触发攻击表现前调用它 |
+| `ApplyRangedAttackDamage` | `PlayerPawn` | `FEnemyAttackResolveResult` | 对玩家应用远程敌人伤害；不触发近战前冲或占据玩家格 |
+| `ApplyRangedFriendlyFireDamage` | `TargetEnemy` | `bool` | 对目标敌人应用远程跨阵营友伤；异阵营目标直接死亡，同阵营返回 `false` |
+| `HasPendingRangedAttack` | 无 | `bool` | 返回敌人是否处于远程瞄准状态且持有攻击线 |
+| `ResolvePendingRangedAttack` | `PlayerPawn` | `bool` | 结算上一回合锁定的远程攻击线，并清除范围提示 |
+| `ClearRangedAimMode` | 无 | 无 | 清除远程瞄准状态、攻击线缓存和 Telegraph 显示 |
 | `OnMeleeAttackResolved` | `PlayerPawn`, `AttackResult` | 无 | `BlueprintImplementableEvent`。敌人近战伤害结算后触发表现或提示 |
-| `Kill` | 无 | 无 | 标记死亡、隐藏 Actor、关闭碰撞 |
+| `OnFriendlyFireResolved` | `OtherEnemy`, `ResolveResult` | 无 | `BlueprintImplementableEvent`。敌人友伤结算后触发表现或提示 |
+| `OnRangedAimStarted` | `PlayerPawn`, `AttackTiles` | 无 | `BlueprintImplementableEvent`。远程敌人进入瞄准模式后触发 |
+| `OnRangedAttackResolved` | `PlayerPawn`, `AttackTiles`, `AttackResult`, `bHitPlayer` | 无 | `BlueprintImplementableEvent`。远程攻击线结算后触发 |
+| `OnRangedAimCleared` | 无 | 无 | `BlueprintImplementableEvent`。远程瞄准状态被清除后触发 |
+| `OnGridEnemyKilled` | `Enemy`, `DeathCoord`, `DeathWorldLocation` | 无 | 敌人死亡广播。`AGridEnemyManager` 会监听该事件并触发死亡地块相机聚焦 |
+| `Kill` | 无 | 无 | 标记死亡、广播 `OnGridEnemyKilled`、隐藏 Actor、关闭碰撞 |
 
 ### 默认敌人 AI
 
@@ -134,9 +157,9 @@
 
 1. 如果敌人不可行动或玩家为空，返回 `false`。
 2. 如果敌人与玩家曼哈顿距离为 `1`，先调用 `ApplyMeleeAttackDamage()` 结算伤害，再调用 `ExecuteMeleeAttack()` 并返回 `true`。
-3. 如果敌人与玩家不相邻，优先沿距离更大的轴靠近玩家一格。
-4. 如果优先方向被阻挡，尝试另一个轴。
-5. 如果移动成功，立即更新网格占据和 `CurrentGridCoord`，随后用 `MoveDuration` 播放 Actor 位置插值，并返回 `true`；否则返回 `false`。
+3. 如果敌人与玩家不相邻，调用 `AGridManager::FindPathAStar()` 计算到玩家格的四方向网格路径。
+4. 如果路径至少包含起点和下一步，敌人尝试移动到路径上的下一格。
+5. 如果移动成功，立即更新网格占据和 `CurrentGridCoord`，随后用 `MoveDuration` 播放 Actor 位置插值，并返回 `true`；如果 A* 找不到路径或移动被阻挡，则返回 `false`。
 
 默认 `ExecuteMeleeAttack()` 会调用 `ApplyMeleeAttackDamage()`，并输出攻击日志。默认 AI 已经在进入该事件前完成一次伤害结算，因此内部有防重复保护，避免蓝图调用 Parent 时重复扣血。
 
@@ -147,6 +170,22 @@
 - 未击败玩家时，敌人向玩家格方向前冲一小段距离，再回到原格。
 - 击败玩家时，敌人通过 `AGridManager::ClearOccupant()` 清空玩家格，再通过 `RequestMove()` 占据玩家所在格，并播放进入该格的移动插值。
 - 玩家失败后进入 `Defeat` 状态，敌人管理器不再继续执行后续敌人行动。
+
+### 远程敌人瞄准与攻击线
+
+`BehaviorType == Ranged` 的敌人使用默认两阶段远程 AI：
+
+1. 如果敌人与玩家在同一 X 轴或 Y 轴，且敌人与玩家之间没有 `Obstacle`，敌人进入 `AimingRangedAttack`。
+2. 进入瞄准后，敌人缓存 `PendingRangedAttackTiles`。这条线从敌人相邻格开始，沿瞄准方向延伸，直到遇到无效坐标或 `Obstacle`；`Obstacle` 格不会被包含。
+3. `URangedAttackTelegraphComponent` 使用缓存的攻击线生成地格提示。该提示是纯表现层，不会调用 `SetTileType()`，也不会改变地块属性或占据状态。
+4. 下一次敌方回合开始时，`AGridEnemyManager` 会先结算所有待结算远程攻击，再执行普通敌人行动。
+5. 远程攻击按上一回合锁定的 `PendingRangedAttackTiles` 结算；玩家如果已经离开这条线，则不会被命中。
+6. 命中玩家时调用 `ApplyRangedAttackDamage()`，复用敌人的 `AttackDamage`、`AttackAttributeDamage` 和阵营属性伤害设置，但不会触发近战前冲或占据玩家格。
+7. 攻击线中如果包含其他敌人，会调用 `ApplyRangedFriendlyFireDamage()` 处理跨阵营远程友伤。
+8. 如果远程敌人在开火回合被玩家属性压制，会取消待结算攻击线并清除提示。
+9. 攻击结算后调用 `ClearRangedAimMode()`，清除攻击线缓存和 Telegraph 显示。
+
+`URangedAttackTelegraphComponent` 默认复用 `GridSettings->TileMesh` 生成 `InstancedStaticMesh` 提示。可在敌人蓝图中配置 `TelegraphTileMesh`、`TelegraphMaterial`、`ZOffset` 和 `ScaleMultiplier`。如果未配置提示材质，组件仍会生成实例并使用网格默认材质；如果没有可用 Mesh，则只保留逻辑瞄准，不显示视觉提示。
 
 ### 蓝图覆写 AI
 
@@ -241,6 +280,30 @@
 | `AppliedAcidDelta` | `int32` | 实际应用的酸性值变化 |
 | `RemainingHealth` | `int32` | 结算后的玩家剩余 HP |
 
+### FEnemyFriendlyFireResolveResult
+
+结构：`FEnemyFriendlyFireResolveResult`
+
+路径：`Source/Chessboard_Roguelike/Public/Combat/CombatTypes.h`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `bResolved` | `bool` | 本次敌人友伤是否完成有效结算 |
+| `bSameFaction` | `bool` | 两个敌人是否同阵营；同阵营不会造成伤害 |
+| `bAttackerKilled` | `bool` | 攻击者是否在本次结算中死亡 |
+| `bTargetKilled` | `bool` | 目标敌人是否在本次结算中死亡 |
+| `CollisionTileType` | `ETileType` | 近战冲突发生的目标格地块类型；远程友伤保留默认值 |
+| `Reason` | `EEnemyFriendlyFireResolveReason` | 结算原因，用于蓝图表现或调试日志 |
+
+`EEnemyFriendlyFireResolveReason` 当前包含：
+
+- `SameFaction`：同阵营，不造成伤害。
+- `RangedDifferentFaction`：远程命中异阵营敌人，目标直接死亡。
+- `ConstructTileKillsAcid`：构成地块上的近战冲突击杀酸性敌人。
+- `AcidTileKillsConstruct`：酸性地块上的近战冲突击杀构成敌人。
+- `MinimalTileLowerThreshold`：极简地块击杀 `KillThreshold` 较低者。
+- `MinimalTileEqualThreshold`：极简地块双方 `KillThreshold` 相同，双方同时死亡。
+
 ## CombatResolverComponent
 
 类：`UCombatResolverComponent`
@@ -260,6 +323,8 @@
 | `ResolvePlayerMeleeAttack` | `PlayerActor`, `EnemyActor` | `FCombatResolveResult` | 结算玩家对目标敌人的近战攻击 |
 | `BuildEnemyMeleeDamage` | `EnemyActor` | `FEnemyAttackDamage` | 从敌人参数生成近战伤害包 |
 | `ResolveEnemyMeleeAttack` | `EnemyActor`, `PlayerPawn` | `FEnemyAttackResolveResult` | 应用敌人对玩家的近战伤害、属性扣减和失败判定 |
+| `ResolveEnemyMeleeCollision` | `Attacker`, `TargetEnemy`, `CollisionTileType` | `FEnemyFriendlyFireResolveResult` | 结算两个敌人在同一目标格发生的跨阵营近战冲突 |
+| `ResolveEnemyRangedFriendlyFire` | `Attacker`, `TargetEnemy` | `FEnemyFriendlyFireResolveResult` | 结算远程敌人命中敌人时的跨阵营友伤 |
 
 ### 免疫与击杀判定
 
@@ -290,6 +355,22 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 ```
 
 敌人不会累计受伤。未击杀时，不会降低 `KillThreshold`，也不会记录剩余 HP。
+
+### 跨阵营友伤判定
+
+敌人友伤不会复用玩家的双属性伤害，也不会进入敌人的免疫或单次阈值伤害流程。`UCombatResolverComponent` 只返回死亡判定，真正的 `Kill()` 和格子占据清理由 `AGridEnemyPawn` 执行。
+
+```text
+同阵营：不造成伤害
+远程异阵营命中：目标直接死亡
+近战异阵营冲突：
+  Construct 地块：Acid 敌人死亡
+  Acid 地块：Construct 敌人死亡
+  Minimal 地块：KillThreshold 较低者死亡
+  Minimal 地块且 KillThreshold 相同：双方死亡
+```
+
+近战冲突发生在敌人试图移动到敌人占据格时。目标死亡且攻击者存活时，攻击者会进入目标格；攻击者死亡时会清空自己的源格；双方死亡时两个格子的占据都会被清空。
 
 ### 判定示例
 
@@ -340,6 +421,11 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 | `ExecuteBasicTurn` | `AGridEnemyPawn` | 敌方回合遍历到该敌人时 | 可覆写完整敌人 AI |
 | `ExecuteMeleeAttack` | `AGridEnemyPawn` | 默认 AI 判断与玩家相邻时 | 可覆写敌人近战表现 |
 | `OnMeleeAttackResolved` | `AGridEnemyPawn` | 敌人近战伤害结算完成后 | 可根据 `FEnemyAttackResolveResult` 播放受击、死亡或提示表现 |
+| `OnFriendlyFireResolved` | `AGridEnemyPawn` | 敌人跨阵营友伤结算完成后 | 可根据 `FEnemyFriendlyFireResolveResult` 播放互伤、死亡或清除提示 |
+| `OnRangedAimStarted` | `AGridEnemyPawn` | 远程敌人锁定攻击线后 | 可播放瞄准、警告音效或额外 UI |
+| `OnRangedAttackResolved` | `AGridEnemyPawn` | 远程攻击线结算完成后 | 可根据 `AttackTiles`、`AttackResult` 和 `bHitPlayer` 播放开火、受击或落空表现 |
+| `OnRangedAimCleared` | `AGridEnemyPawn` | 远程瞄准状态被清除后 | 可清理蓝图侧额外提示 |
+| `OnGridEnemyKilled` | `AGridEnemyPawn` | `Kill()` 标记敌人死亡时 | `AGridEnemyManager` 监听后通知 `AGridPlayerController`，让相机短暂聚焦死亡地块 |
 
 如果后续需要 UI 或特效直接响应玩家攻击敌人的结果，建议新增 `OnPlayerMeleeAttackResolved` 一类的事件，并广播 `FCombatResolveResult`、目标敌人和目标坐标。敌人攻击玩家的结果当前已通过 `OnMeleeAttackResolved` 暴露给蓝图表现层。
 
@@ -383,6 +469,37 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 2. 目标格是否有效、可通行、未被占据。
 3. 是否误把玩家所在格作为移动目标。敌人攻击玩家应走 `ExecuteMeleeAttack()`，不是移动进玩家格。
 4. 是否在蓝图中直接改了 `AGridManager::Tiles`，导致占据状态和 Actor 位置不同步。
+
+### 敌人撞到异阵营敌人没有触发友伤
+
+检查顺序：
+
+1. 移动是否通过 `TryMoveToGridCoord()`，而不是直接调用 `AGridManager::RequestMove()`。
+2. 目标格 `OccupantType` 是否为 `Enemy`，且 `OccupantActor` 是否指向另一名 `AGridEnemyPawn`。
+3. 两个敌人的 `Faction` 是否不同；同阵营不会造成友伤。
+4. 目标格 `TileType` 是否为 `Construct`、`Acid` 或 `Minimal`。
+5. 如果是 `Minimal` 地块，两个敌人的 `KillThreshold` 是否符合预期。
+
+### 远程敌人命中异阵营敌人没有击杀
+
+检查顺序：
+
+1. 远程攻击逻辑是否在射线命中敌人后调用了 `ApplyRangedFriendlyFireDamage(TargetEnemy)`。
+2. `TargetEnemy` 是否存活，且不是攻击者自己。
+3. 两个敌人的 `Faction` 是否不同；同阵营返回 `false`。
+4. 目标敌人的 `GridManager` 或攻击者的 `GridManager` 是否有效，以便清空目标格占据。
+
+### 远程敌人没有显示攻击范围
+
+检查顺序：
+
+1. 敌人 `BehaviorType` 是否为 `Ranged`。
+2. 敌人与玩家是否处于同一 X 轴或 Y 轴。
+3. 敌人与玩家之间是否存在 `TileType == Obstacle` 或 `OccupantType == Obstacle` 的地块；障碍会阻断瞄准。
+4. 敌人是否已经持有有效 `GridManager`，且棋盘已经生成。
+5. `RangedAttackTelegraphComponent` 是否存在；默认 `AGridEnemyPawn` 构造时会创建该组件。
+6. `TelegraphTileMesh` 是否已配置，或 `GridSettings->TileMesh` 是否有效。
+7. 如需明显区别攻击范围，是否给 `TelegraphMaterial` 配置了警告材质。
 
 ### 攻击后敌人不死
 
@@ -440,12 +557,18 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 - 敌人可按阵营扣减玩家构成值或酸性值。
 - 玩家 HP 归零后进入 `Defeat` 回合状态。
 - 敌人近战伤害结果可通过 `OnMeleeAttackResolved` 供蓝图表现层使用。
+- 敌人跨阵营近战冲突会通过 `ResolveEnemyMeleeCollision()` 统一结算，并由 `TryMoveToGridCoord()` 应用死亡和占格变化。
+- 远程敌人可通过 `ApplyRangedFriendlyFireDamage()` 复用 `ResolveEnemyRangedFriendlyFire()`，异阵营目标直接死亡。
+- 远程敌人可在同 X/Y 且无遮挡时进入 `AimingRangedAttack`，通过 `URangedAttackTelegraphComponent` 显示锁定攻击线，并在下一次敌方回合开始时结算。
+- 远程攻击命中玩家时使用 `ApplyRangedAttackDamage()`，不会触发近战前冲或占据玩家所在格。
+- 敌人友伤结果可通过 `OnFriendlyFireResolved` 供蓝图表现层使用。
 - `ExecuteBasicTurn` 和 `ExecuteMeleeAttack` 可在蓝图中覆写。
 
 未实现：
 
 - 敌人远程攻击。
-- 敌人友伤。
+- 远程敌人同一结算窗口内的互击同步死亡调度。
+- 跨阵营清除链的专用队列、连锁表现和 UI 提示。
 - 击杀掉落地块转换能量。
 - 战斗专用音效和特效事件。
 - 敌人 DataAsset 配置表。

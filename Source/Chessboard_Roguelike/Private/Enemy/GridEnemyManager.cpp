@@ -5,6 +5,7 @@
 #include "EngineUtils.h"
 #include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
+#include "Player/GridPlayerController.h"
 #include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
 
@@ -75,6 +76,8 @@ void AGridEnemyManager::RegisterEnemy(AGridEnemyPawn* Enemy)
 	}
 
 	RegisteredEnemies.AddUnique(Enemy);
+	Enemy->OnGridEnemyKilled.RemoveDynamic(this, &AGridEnemyManager::HandleEnemyKilled);
+	Enemy->OnGridEnemyKilled.AddDynamic(this, &AGridEnemyManager::HandleEnemyKilled);
 }
 
 void AGridEnemyManager::UnregisterEnemy(AGridEnemyPawn* Enemy)
@@ -84,6 +87,7 @@ void AGridEnemyManager::UnregisterEnemy(AGridEnemyPawn* Enemy)
 		return;
 	}
 
+	Enemy->OnGridEnemyKilled.RemoveDynamic(this, &AGridEnemyManager::HandleEnemyKilled);
 	RegisteredEnemies.Remove(Enemy);
 }
 
@@ -138,24 +142,33 @@ void AGridEnemyManager::ExecuteEnemyTurn()
 	}
 
 	const TArray<TObjectPtr<AGridEnemyPawn>> EnemiesThisTurn = RegisteredEnemies;
-	int32 ActedEnemyCount = 0;
+	TSet<AGridEnemyPawn*> ResolvedRangedAttackers;
+	int32 ActedEnemyCount = ResolvePendingRangedAttacks(ResolvedRangedAttackers);
 
-	for (AGridEnemyPawn* Enemy : EnemiesThisTurn)
+	if (PlayerAttributes && PlayerAttributes->IsDefeated())
 	{
-		if (!IsValid(Enemy) || !Enemy->CanAct())
-		{
-			continue;
-		}
+		TurnManager->SetTurnState(ETurnState::Defeat);
+	}
 
-		if (Enemy->ExecuteBasicTurn(PlayerPawn))
+	if (TurnManager->CurrentTurnState != ETurnState::Defeat)
+	{
+		for (AGridEnemyPawn* Enemy : EnemiesThisTurn)
 		{
-			++ActedEnemyCount;
-		}
+			if (!IsValid(Enemy) || !Enemy->CanAct() || Enemy->HasPendingRangedAttack() || ResolvedRangedAttackers.Contains(Enemy))
+			{
+				continue;
+			}
 
-		if (PlayerAttributes && PlayerAttributes->IsDefeated())
-		{
-			TurnManager->SetTurnState(ETurnState::Defeat);
-			break;
+			if (Enemy->ExecuteBasicTurn(PlayerPawn))
+			{
+				++ActedEnemyCount;
+			}
+
+			if (PlayerAttributes && PlayerAttributes->IsDefeated())
+			{
+				TurnManager->SetTurnState(ETurnState::Defeat);
+				break;
+			}
 		}
 	}
 
@@ -192,6 +205,22 @@ TArray<AGridEnemyPawn*> AGridEnemyManager::GetAliveEnemies() const
 	}
 
 	return AliveEnemies;
+}
+
+void AGridEnemyManager::HandleEnemyKilled(AGridEnemyPawn* Enemy, FIntPoint DeathCoord, FVector DeathWorldLocation)
+{
+	AutoInitializeReferences();
+
+	AGridPlayerController* GridPlayerController = PlayerPawn
+		? Cast<AGridPlayerController>(PlayerPawn->GetController())
+		: nullptr;
+	if (!GridPlayerController)
+	{
+		UE_LOG(LogGridEnemyManager, Verbose, TEXT("Enemy death camera focus skipped: GridPlayerController not found."));
+		return;
+	}
+
+	GridPlayerController->FocusCombatCameraOnGridTile(DeathWorldLocation);
 }
 
 void AGridEnemyManager::AutoInitializeReferences()
@@ -254,4 +283,42 @@ bool AGridEnemyManager::HasMovingEnemies() const
 	}
 
 	return false;
+}
+
+int32 AGridEnemyManager::ResolvePendingRangedAttacks(TSet<AGridEnemyPawn*>& OutResolvedAttackers)
+{
+	if (!PlayerPawn)
+	{
+		return 0;
+	}
+
+	int32 ResolvedCount = 0;
+	const TArray<TObjectPtr<AGridEnemyPawn>> EnemiesThisTurn = RegisteredEnemies;
+	for (AGridEnemyPawn* Enemy : EnemiesThisTurn)
+	{
+		if (!IsValid(Enemy) || !Enemy->CanAct() || !Enemy->HasPendingRangedAttack())
+		{
+			continue;
+		}
+
+		const bool bResolvedAttack = Enemy->ResolvePendingRangedAttack(PlayerPawn);
+		OutResolvedAttackers.Add(Enemy);
+		if (bResolvedAttack)
+		{
+			++ResolvedCount;
+		}
+
+		const UPlayerAttributeComponent* PlayerAttributes = PlayerPawn->PlayerAttributeComponent;
+		if (!PlayerAttributes)
+		{
+			PlayerAttributes = PlayerPawn->FindComponentByClass<UPlayerAttributeComponent>();
+		}
+
+		if (PlayerAttributes && PlayerAttributes->IsDefeated())
+		{
+			break;
+		}
+	}
+
+	return ResolvedCount;
 }

@@ -253,6 +253,8 @@ L-System 符号：
 
 `FDungeonSpawnCandidate` 包含 `Coord`、`RegionId` 和 `Depth`，用于后续刷怪、事件、奖励系统按区域和深度做筛选。
 
+生成候选点前会从 `StartCoord` 执行一次 Flood Fill；敌人、事件和奖励候选点只会从可达格中选取，因此敌人出生点必须从玩家出生点可达。
+
 `RequestMove()` 规则：
 
 - 目标坐标必须存在。

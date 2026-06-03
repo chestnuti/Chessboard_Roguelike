@@ -27,4 +27,15 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	FEnemyAttackResolveResult ResolveEnemyMeleeAttack(const AGridEnemyPawn* EnemyActor, AGridPawn* PlayerPawn) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Friendly Fire")
+	static FEnemyFriendlyFireResolveResult ResolveEnemyRangedFriendlyFire(
+		const AGridEnemyPawn* Attacker,
+		const AGridEnemyPawn* TargetEnemy);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Friendly Fire")
+	static FEnemyFriendlyFireResolveResult ResolveEnemyMeleeCollision(
+		const AGridEnemyPawn* Attacker,
+		const AGridEnemyPawn* TargetEnemy,
+		ETileType CollisionTileType);
 };

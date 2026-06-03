@@ -89,6 +89,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Grid")
 	FIntPoint WorldToGrid(FVector WorldLocation) const;
 
+	UFUNCTION(BlueprintCallable, Category = "Grid|Pathfinding")
+	bool FindPathAStar(FIntPoint StartCoord, FIntPoint GoalCoord, TArray<FIntPoint>& OutPath, bool bAllowOccupiedGoal = false) const;
+
 	// Attempts initial placement without modifying any other tile.
 	UFUNCTION(BlueprintCallable, Category = "Grid")
 	bool TryOccupyTile(FIntPoint Coord, AActor* Occupant, EGridOccupantType OccupantType);

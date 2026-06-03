@@ -27,6 +27,41 @@ namespace
 			return 0.f;
 		}
 	}
+
+	int32 GetManhattanDistance(const FIntPoint& A, const FIntPoint& B)
+	{
+		return FMath::Abs(A.X - B.X) + FMath::Abs(A.Y - B.Y);
+	}
+
+	int32 GetPathScore(const TMap<FIntPoint, int32>& Scores, const FIntPoint& Coord)
+	{
+		if (const int32* Score = Scores.Find(Coord))
+		{
+			return *Score;
+		}
+
+		return MAX_int32 / 4;
+	}
+
+	void ReconstructPath(const TMap<FIntPoint, FIntPoint>& CameFrom, FIntPoint Current, TArray<FIntPoint>& OutPath)
+	{
+		OutPath.Reset();
+		OutPath.Add(Current);
+
+		while (const FIntPoint* Previous = CameFrom.Find(Current))
+		{
+			Current = *Previous;
+			OutPath.Add(Current);
+		}
+
+		for (int32 Index = 0; Index < OutPath.Num() / 2; ++Index)
+		{
+			const int32 OppositeIndex = OutPath.Num() - Index - 1;
+			const FIntPoint Temp = OutPath[Index];
+			OutPath[Index] = OutPath[OppositeIndex];
+			OutPath[OppositeIndex] = Temp;
+		}
+	}
 }
 
 AGridManager::AGridManager()
@@ -419,6 +454,119 @@ FIntPoint AGridManager::WorldToGrid(FVector WorldLocation) const
 	return FIntPoint(
 		FMath::RoundToInt(LocalLocation.X / GridSettings->TileSize),
 		FMath::RoundToInt(LocalLocation.Y / GridSettings->TileSize));
+}
+
+bool AGridManager::FindPathAStar(FIntPoint StartCoord, FIntPoint GoalCoord, TArray<FIntPoint>& OutPath, bool bAllowOccupiedGoal) const
+{
+	OutPath.Reset();
+
+	const FTileData* StartTile = Tiles.Find(StartCoord);
+	const FTileData* GoalTile = Tiles.Find(GoalCoord);
+	if (!StartTile || !GoalTile)
+	{
+		return false;
+	}
+
+	if (!StartTile->bWalkable || StartTile->TileType == ETileType::Obstacle
+		|| !GoalTile->bWalkable || GoalTile->TileType == ETileType::Obstacle)
+	{
+		return false;
+	}
+
+	if (GoalTile->OccupantType != EGridOccupantType::Empty && !bAllowOccupiedGoal)
+	{
+		return false;
+	}
+
+	if (StartCoord == GoalCoord)
+	{
+		OutPath.Add(StartCoord);
+		return true;
+	}
+
+	static const FIntPoint NeighborOffsets[] =
+	{
+		FIntPoint(1, 0),
+		FIntPoint(-1, 0),
+		FIntPoint(0, 1),
+		FIntPoint(0, -1)
+	};
+
+	TArray<FIntPoint> OpenSet;
+	TSet<FIntPoint> ClosedSet;
+	TMap<FIntPoint, FIntPoint> CameFrom;
+	TMap<FIntPoint, int32> GScore;
+	TMap<FIntPoint, int32> FScore;
+
+	OpenSet.Add(StartCoord);
+	GScore.Add(StartCoord, 0);
+	FScore.Add(StartCoord, GetManhattanDistance(StartCoord, GoalCoord));
+
+	while (!OpenSet.IsEmpty())
+	{
+		int32 BestOpenIndex = 0;
+		int32 BestFScore = GetPathScore(FScore, OpenSet[0]);
+		int32 BestHeuristic = GetManhattanDistance(OpenSet[0], GoalCoord);
+
+		for (int32 Index = 1; Index < OpenSet.Num(); ++Index)
+		{
+			const FIntPoint& Candidate = OpenSet[Index];
+			const int32 CandidateFScore = GetPathScore(FScore, Candidate);
+			const int32 CandidateHeuristic = GetManhattanDistance(Candidate, GoalCoord);
+			if (CandidateFScore < BestFScore
+				|| (CandidateFScore == BestFScore && CandidateHeuristic < BestHeuristic))
+			{
+				BestOpenIndex = Index;
+				BestFScore = CandidateFScore;
+				BestHeuristic = CandidateHeuristic;
+			}
+		}
+
+		const FIntPoint Current = OpenSet[BestOpenIndex];
+		if (Current == GoalCoord)
+		{
+			ReconstructPath(CameFrom, Current, OutPath);
+			return true;
+		}
+
+		OpenSet.RemoveAtSwap(BestOpenIndex);
+		ClosedSet.Add(Current);
+
+		for (const FIntPoint& Offset : NeighborOffsets)
+		{
+			const FIntPoint Neighbor = Current + Offset;
+			if (ClosedSet.Contains(Neighbor))
+			{
+				continue;
+			}
+
+			const FTileData* NeighborTile = Tiles.Find(Neighbor);
+			if (!NeighborTile || !NeighborTile->bWalkable || NeighborTile->TileType == ETileType::Obstacle)
+			{
+				continue;
+			}
+
+			const bool bIsGoal = Neighbor == GoalCoord;
+			if (NeighborTile->OccupantType != EGridOccupantType::Empty && !(bIsGoal && bAllowOccupiedGoal))
+			{
+				continue;
+			}
+
+			const int32 TentativeGScore = GetPathScore(GScore, Current) + 1;
+			if (TentativeGScore >= GetPathScore(GScore, Neighbor))
+			{
+				continue;
+			}
+
+			CameFrom.Add(Neighbor, Current);
+			GScore.Add(Neighbor, TentativeGScore);
+			FScore.Add(Neighbor, TentativeGScore + GetManhattanDistance(Neighbor, GoalCoord));
+
+			OpenSet.AddUnique(Neighbor);
+		}
+	}
+
+	return false;
 }
 
 bool AGridManager::TryOccupyTile(FIntPoint Coord, AActor* Occupant, EGridOccupantType OccupantType)

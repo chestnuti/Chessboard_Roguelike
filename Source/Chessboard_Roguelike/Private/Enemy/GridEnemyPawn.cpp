@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
 #include "Grid/GridManager.h"
+#include "Enemy/RangedAttackTelegraphComponent.h"
 #include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
 
@@ -22,6 +23,8 @@ AGridEnemyPawn::AGridEnemyPawn()
 	EnemyMesh->SetupAttachment(SceneRoot);
 	// Grid occupancy, not mesh collision, owns gameplay blocking.
 	EnemyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	RangedAttackTelegraphComponent = CreateDefaultSubobject<URangedAttackTelegraphComponent>(TEXT("RangedAttackTelegraphComponent"));
 }
 
 void AGridEnemyPawn::BeginPlay()
@@ -126,6 +129,7 @@ void AGridEnemyPawn::InitializeOnGrid(AGridManager* InGridManager, FIntPoint InS
 	SetActorLocation(GridManager->GridToWorld(CurrentGridCoord));
 	bIsMoving = false;
 	bIsAttackReboundVisualMove = false;
+	ClearRangedAimMode();
 	SetActorTickEnabled(false);
 	bDead = false;
 	bInitializedOnGrid = true;
@@ -173,6 +177,59 @@ bool AGridEnemyPawn::TryMoveToGridCoord(FIntPoint TargetCoord)
 	const FVector FromLocation = GetActorLocation();
 	const FVector ToLocation = GridManager->GridToWorld(TargetCoord);
 
+	FTileData TargetTileData;
+	if (GridManager->GetTileData(TargetCoord, TargetTileData)
+		&& TargetTileData.OccupantType == EGridOccupantType::Enemy)
+	{
+		AGridEnemyPawn* TargetEnemy = Cast<AGridEnemyPawn>(TargetTileData.OccupantActor.Get());
+		if (!TargetEnemy || TargetEnemy == this)
+		{
+			return false;
+		}
+
+		const FEnemyFriendlyFireResolveResult FriendlyFireResult =
+			UCombatResolverComponent::ResolveEnemyMeleeCollision(this, TargetEnemy, TargetTileData.TileType);
+
+		if (!FriendlyFireResult.bResolved
+			|| FriendlyFireResult.bSameFaction
+			|| (!FriendlyFireResult.bAttackerKilled && !FriendlyFireResult.bTargetKilled))
+		{
+			return false;
+		}
+
+		OnFriendlyFireResolved(TargetEnemy, FriendlyFireResult);
+		TargetEnemy->OnFriendlyFireResolved(this, FriendlyFireResult);
+
+		if (FriendlyFireResult.bTargetKilled)
+		{
+			GridManager->ClearOccupant(TargetCoord);
+			TargetEnemy->Kill();
+		}
+
+		if (FriendlyFireResult.bAttackerKilled)
+		{
+			GridManager->ClearOccupant(CurrentGridCoord);
+			Kill();
+			return true;
+		}
+
+		if (FriendlyFireResult.bTargetKilled)
+		{
+			if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
+			{
+				UE_LOG(LogGridEnemyPawn, Warning, TEXT("%s resolved friendly fire but failed to move into (%d,%d)."),
+					*GetNameSafe(this), TargetCoord.X, TargetCoord.Y);
+				return true;
+			}
+
+			CurrentGridCoord = TargetCoord;
+			StartVisualMove(FromLocation, ToLocation);
+			return true;
+		}
+
+		return true;
+	}
+
 	if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
 	{
 		return false;
@@ -196,6 +253,21 @@ bool AGridEnemyPawn::ExecuteBasicTurn_Implementation(AGridPawn* PlayerPawn)
 		return false;
 	}
 
+	if (BehaviorType == EEnemyBehaviorType::Ranged)
+	{
+		if (HasPendingRangedAttack())
+		{
+			return ResolvePendingRangedAttack(PlayerPawn);
+		}
+
+		if (EnterRangedAimMode(PlayerPawn))
+		{
+			return true;
+		}
+
+		return TryMoveTowardRangedAlignment(PlayerPawn);
+	}
+
 	const FIntPoint PlayerCoord = PlayerPawn->CurrentGridCoord;
 	const FIntPoint Delta = PlayerCoord - CurrentGridCoord;
 	const int32 ManhattanDistance = FMath::Abs(Delta.X) + FMath::Abs(Delta.Y);
@@ -208,39 +280,245 @@ bool AGridEnemyPawn::ExecuteBasicTurn_Implementation(AGridPawn* PlayerPawn)
 		return true;
 	}
 
-	TArray<FIntPoint> CandidateDirections;
-	const FIntPoint HorizontalStep(FMath::Sign(Delta.X), 0);
-	const FIntPoint VerticalStep(0, FMath::Sign(Delta.Y));
-
-	if (FMath::Abs(Delta.X) >= FMath::Abs(Delta.Y))
+	TArray<FIntPoint> PathToPlayer;
+	if (GridManager->FindPathAStar(CurrentGridCoord, PlayerCoord, PathToPlayer, true) && PathToPlayer.Num() >= 2)
 	{
-		if (Delta.X != 0)
-		{
-			CandidateDirections.Add(HorizontalStep);
-		}
-		if (Delta.Y != 0)
-		{
-			CandidateDirections.Add(VerticalStep);
-		}
-	}
-	else
-	{
-		if (Delta.Y != 0)
-		{
-			CandidateDirections.Add(VerticalStep);
-		}
-		if (Delta.X != 0)
-		{
-			CandidateDirections.Add(HorizontalStep);
-		}
+		return TryMoveToGridCoord(PathToPlayer[1]);
 	}
 
-	for (const FIntPoint& Direction : CandidateDirections)
+	return false;
+}
+
+bool AGridEnemyPawn::HasPendingRangedAttack() const
+{
+	return ActionState == EEnemyActionState::AimingRangedAttack && !PendingRangedAttackTiles.IsEmpty();
+}
+
+bool AGridEnemyPawn::ResolvePendingRangedAttack(AGridPawn* PlayerPawn)
+{
+	if (!IsAlive() || !PlayerPawn || !HasPendingRangedAttack())
 	{
-		if (TryMoveToGridCoord(CurrentGridCoord + Direction))
+		ClearRangedAimMode();
+		return false;
+	}
+
+	if (IsSuppressedByPlayer(PlayerPawn))
+	{
+		OnSuppressedByPlayer(PlayerPawn);
+		ClearRangedAimMode();
+		return false;
+	}
+
+	const TArray<FIntPoint> AttackTiles = PendingRangedAttackTiles;
+	const bool bHitPlayer = AttackTiles.Contains(PlayerPawn->CurrentGridCoord);
+	FEnemyAttackResolveResult AttackResult;
+
+	if (bHitPlayer)
+	{
+		AttackResult = ApplyRangedAttackDamage(PlayerPawn);
+	}
+
+	for (const FIntPoint& TileCoord : AttackTiles)
+	{
+		if (!GridManager || TileCoord == CurrentGridCoord || TileCoord == PlayerPawn->CurrentGridCoord)
 		{
-			return true;
+			continue;
 		}
+
+		FTileData TileData;
+		if (!GridManager->GetTileData(TileCoord, TileData) || TileData.OccupantType != EGridOccupantType::Enemy)
+		{
+			continue;
+		}
+
+		AGridEnemyPawn* TargetEnemy = Cast<AGridEnemyPawn>(TileData.OccupantActor.Get());
+		if (TargetEnemy && TargetEnemy != this)
+		{
+			ApplyRangedFriendlyFireDamage(TargetEnemy);
+		}
+	}
+
+	ClearRangedAimMode();
+	OnRangedAttackResolved(PlayerPawn, AttackTiles, AttackResult, bHitPlayer);
+	return true;
+}
+
+void AGridEnemyPawn::ClearRangedAimMode()
+{
+	const bool bWasAiming = ActionState == EEnemyActionState::AimingRangedAttack || !PendingRangedAttackTiles.IsEmpty();
+	ActionState = EEnemyActionState::Idle;
+	PendingRangedAttackTiles.Reset();
+	PendingRangedAttackDirection = FIntPoint::ZeroValue;
+
+	if (RangedAttackTelegraphComponent)
+	{
+		RangedAttackTelegraphComponent->ClearTelegraph();
+	}
+
+	if (bWasAiming)
+	{
+		OnRangedAimCleared();
+	}
+}
+
+bool AGridEnemyPawn::EnterRangedAimMode(AGridPawn* PlayerPawn)
+{
+	TArray<FIntPoint> AttackTiles;
+	FIntPoint AttackDirection = FIntPoint::ZeroValue;
+	if (!HasLineOfSightToPlayer(PlayerPawn, AttackTiles, AttackDirection))
+	{
+		return false;
+	}
+
+	ActionState = EEnemyActionState::AimingRangedAttack;
+	PendingRangedAttackTiles = AttackTiles;
+	PendingRangedAttackDirection = AttackDirection;
+
+	if (RangedAttackTelegraphComponent)
+	{
+		RangedAttackTelegraphComponent->ShowTelegraph(GridManager, PendingRangedAttackTiles);
+	}
+
+	OnRangedAimStarted(PlayerPawn, PendingRangedAttackTiles);
+	return true;
+}
+
+bool AGridEnemyPawn::TryMoveTowardRangedAlignment(AGridPawn* PlayerPawn)
+{
+	if (!CanAct() || !PlayerPawn || !GridManager)
+	{
+		return false;
+	}
+
+	static const FIntPoint NeighborOffsets[] =
+	{
+		FIntPoint(1, 0),
+		FIntPoint(-1, 0),
+		FIntPoint(0, 1),
+		FIntPoint(0, -1)
+	};
+
+	const FIntPoint PlayerCoord = PlayerPawn->CurrentGridCoord;
+	FIntPoint BestTarget = CurrentGridCoord;
+	int32 BestScore = MAX_int32;
+
+	for (const FIntPoint& Offset : NeighborOffsets)
+	{
+		const FIntPoint Candidate = CurrentGridCoord + Offset;
+		FTileData CandidateTile;
+		if (!GridManager->GetTileData(Candidate, CandidateTile)
+			|| !CandidateTile.bWalkable
+			|| CandidateTile.TileType == ETileType::Obstacle
+			|| CandidateTile.OccupantType != EGridOccupantType::Empty)
+		{
+			continue;
+		}
+
+		FIntPoint CandidateDirection = FIntPoint::ZeroValue;
+		TArray<FIntPoint> CandidateLine;
+		const bool bSameAxis = TryGetAxisDirection(Candidate, PlayerCoord, CandidateDirection);
+		const bool bHasLineOfSight = bSameAxis
+			&& BuildRangedLineFromCoord(Candidate, CandidateDirection, CandidateLine)
+			&& CandidateLine.Contains(PlayerCoord);
+
+		const FIntPoint Delta = PlayerCoord - Candidate;
+		const int32 ManhattanDistance = FMath::Abs(Delta.X) + FMath::Abs(Delta.Y);
+		const int32 AlignmentDistance = FMath::Min(FMath::Abs(Delta.X), FMath::Abs(Delta.Y));
+		const int32 AxisPriority = bHasLineOfSight ? 0 : (bSameAxis ? 1000 : 2000);
+		const int32 CandidateScore = AxisPriority + AlignmentDistance * 100 + ManhattanDistance;
+
+		if (CandidateScore < BestScore)
+		{
+			BestScore = CandidateScore;
+			BestTarget = Candidate;
+		}
+	}
+
+	if (BestTarget != CurrentGridCoord)
+	{
+		return TryMoveToGridCoord(BestTarget);
+	}
+
+	TArray<FIntPoint> PathToPlayer;
+	if (GridManager->FindPathAStar(CurrentGridCoord, PlayerCoord, PathToPlayer, true) && PathToPlayer.Num() >= 2)
+	{
+		return TryMoveToGridCoord(PathToPlayer[1]);
+	}
+
+	return false;
+}
+
+bool AGridEnemyPawn::HasLineOfSightToPlayer(
+	const AGridPawn* PlayerPawn,
+	TArray<FIntPoint>& OutLineTiles,
+	FIntPoint& OutDirection) const
+{
+	OutLineTiles.Reset();
+	OutDirection = FIntPoint::ZeroValue;
+
+	if (!GridManager || !PlayerPawn)
+	{
+		return false;
+	}
+
+	if (!TryGetAxisDirection(CurrentGridCoord, PlayerPawn->CurrentGridCoord, OutDirection))
+	{
+		return false;
+	}
+
+	if (!BuildRangedLineFromCoord(CurrentGridCoord, OutDirection, OutLineTiles))
+	{
+		return false;
+	}
+
+	return OutLineTiles.Contains(PlayerPawn->CurrentGridCoord);
+}
+
+bool AGridEnemyPawn::BuildRangedLineFromCoord(
+	FIntPoint StartCoord,
+	FIntPoint Direction,
+	TArray<FIntPoint>& OutLineTiles) const
+{
+	OutLineTiles.Reset();
+
+	if (!GridManager || Direction == FIntPoint::ZeroValue)
+	{
+		return false;
+	}
+
+	const int32 MaxSteps = MaxRangedAttackDistance > 0 ? MaxRangedAttackDistance : MAX_int32;
+	FIntPoint Cursor = StartCoord + Direction;
+	for (int32 Step = 0; Step < MaxSteps && GridManager->IsValidCoord(Cursor); ++Step)
+	{
+		FTileData TileData;
+		if (!GridManager->GetTileData(Cursor, TileData)
+			|| TileData.TileType == ETileType::Obstacle
+			|| TileData.OccupantType == EGridOccupantType::Obstacle)
+		{
+			break;
+		}
+
+		OutLineTiles.Add(Cursor);
+		Cursor = Cursor + Direction;
+	}
+
+	return !OutLineTiles.IsEmpty();
+}
+
+bool AGridEnemyPawn::TryGetAxisDirection(FIntPoint FromCoord, FIntPoint ToCoord, FIntPoint& OutDirection)
+{
+	OutDirection = FIntPoint::ZeroValue;
+
+	if (FromCoord.X == ToCoord.X && FromCoord.Y != ToCoord.Y)
+	{
+		OutDirection = FIntPoint(0, ToCoord.Y > FromCoord.Y ? 1 : -1);
+		return true;
+	}
+
+	if (FromCoord.Y == ToCoord.Y && FromCoord.X != ToCoord.X)
+	{
+		OutDirection = FIntPoint(ToCoord.X > FromCoord.X ? 1 : -1, 0);
+		return true;
 	}
 
 	return false;
@@ -311,6 +589,59 @@ FEnemyAttackResolveResult AGridEnemyPawn::ApplyMeleeAttackDamage(AGridPawn* Play
 	return AttackResult;
 }
 
+FEnemyAttackResolveResult AGridEnemyPawn::ApplyRangedAttackDamage(AGridPawn* PlayerPawn)
+{
+	if (!PlayerPawn || !IsAlive())
+	{
+		return FEnemyAttackResolveResult();
+	}
+
+	UCombatResolverComponent* CombatResolver = PlayerPawn->CombatResolverComponent;
+	if (!CombatResolver)
+	{
+		CombatResolver = PlayerPawn->FindComponentByClass<UCombatResolverComponent>();
+	}
+
+	if (!CombatResolver)
+	{
+		UE_LOG(LogGridEnemyPawn, Warning, TEXT("%s could not ranged-damage %s: CombatResolverComponent not found."),
+			*GetNameSafe(this), *GetNameSafe(PlayerPawn));
+		return FEnemyAttackResolveResult();
+	}
+
+	return CombatResolver->ResolveEnemyMeleeAttack(this, PlayerPawn);
+}
+
+bool AGridEnemyPawn::ApplyRangedFriendlyFireDamage(AGridEnemyPawn* TargetEnemy)
+{
+	if (!IsAlive() || !TargetEnemy || TargetEnemy == this)
+	{
+		return false;
+	}
+
+	const FEnemyFriendlyFireResolveResult FriendlyFireResult =
+		UCombatResolverComponent::ResolveEnemyRangedFriendlyFire(this, TargetEnemy);
+
+	if (!FriendlyFireResult.bResolved
+		|| FriendlyFireResult.bSameFaction
+		|| !FriendlyFireResult.bTargetKilled)
+	{
+		return false;
+	}
+
+	OnFriendlyFireResolved(TargetEnemy, FriendlyFireResult);
+	TargetEnemy->OnFriendlyFireResolved(this, FriendlyFireResult);
+
+	AGridManager* TargetGridManager = TargetEnemy->GridManager ? TargetEnemy->GridManager.Get() : GridManager.Get();
+	if (TargetGridManager)
+	{
+		TargetGridManager->ClearOccupant(TargetEnemy->CurrentGridCoord);
+	}
+
+	TargetEnemy->Kill();
+	return true;
+}
+
 void AGridEnemyPawn::Kill()
 {
 	if (bDead)
@@ -318,9 +649,15 @@ void AGridEnemyPawn::Kill()
 		return;
 	}
 
+	const FIntPoint DeathCoord = CurrentGridCoord;
+	const FVector DeathWorldLocation = GridManager ? GridManager->GridToWorld(DeathCoord) : GetActorLocation();
+
 	bDead = true;
+	OnGridEnemyKilled.Broadcast(this, DeathCoord, DeathWorldLocation);
+
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
+	ClearRangedAimMode();
 	bIsMoving = false;
 	bIsAttackReboundVisualMove = false;
 	SetActorTickEnabled(false);

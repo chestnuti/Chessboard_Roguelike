@@ -6,6 +6,7 @@
 
 class UInputAction;
 class UInputMappingContext;
+class UCombatCameraDirectorComponent;
 class UPlayerAttributeHUDWidget;
 
 UCLASS(Blueprintable)
@@ -18,6 +19,12 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UCombatCameraDirectorComponent> CombatCameraDirectorComponent;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Camera")
+	void FocusCombatCameraOnGridTile(const FVector& TargetWorldLocation);
 
 protected:
 	// Mapping context and actions are assigned in Blueprint/Data assets so bindings stay data-driven.

@@ -1,5 +1,6 @@
 #include "Player/GridPlayerController.h"
 
+#include "Camera/CombatCameraDirectorComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
@@ -13,6 +14,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogGridPlayerController, Log, All);
 
 AGridPlayerController::AGridPlayerController()
 {
+	CombatCameraDirectorComponent = CreateDefaultSubobject<UCombatCameraDirectorComponent>(TEXT("CombatCameraDirectorComponent"));
+
 	PlayerAttributeHUDClass = UPlayerAttributeHUDWidget::StaticClass();
 
 	// Prefer the authored WBP asset when present, with the native widget as a safe fallback.
@@ -21,6 +24,14 @@ AGridPlayerController::AGridPlayerController()
 	if (PlayerAttributeHUDWidgetClass.Succeeded())
 	{
 		PlayerAttributeHUDClass = PlayerAttributeHUDWidgetClass.Class;
+	}
+}
+
+void AGridPlayerController::FocusCombatCameraOnGridTile(const FVector& TargetWorldLocation)
+{
+	if (IsLocalController() && CombatCameraDirectorComponent)
+	{
+		CombatCameraDirectorComponent->FocusGridTileBriefly(TargetWorldLocation);
 	}
 }
 

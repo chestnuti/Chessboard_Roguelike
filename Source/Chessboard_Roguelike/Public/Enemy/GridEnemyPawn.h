@@ -8,8 +8,12 @@
 
 class AGridManager;
 class AGridPawn;
+class AGridEnemyPawn;
+class URangedAttackTelegraphComponent;
 class USceneComponent;
 class UStaticMeshComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGridEnemyKilled, AGridEnemyPawn*, Enemy, FIntPoint, DeathCoord, FVector, DeathWorldLocation);
 
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API AGridEnemyPawn : public APawn
@@ -25,11 +29,17 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> EnemyMesh;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<URangedAttackTelegraphComponent> RangedAttackTelegraphComponent;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy")
 	EEnemyFaction Faction = EEnemyFaction::Construct;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy")
 	EEnemyBehaviorType BehaviorType = EEnemyBehaviorType::Melee;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Enemy")
+	EEnemyActionState ActionState = EEnemyActionState::Idle;
 
 	// This is a single-hit kill threshold, not a traditional damage pool.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy", meta = (ClampMin = "1"))
@@ -44,6 +54,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy|Attack")
 	bool bApplyFactionAttributeDamage = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy|Ranged", meta = (ClampMin = "0"))
+	int32 MaxRangedAttackDistance = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Enemy|Ranged")
+	TArray<FIntPoint> PendingRangedAttackTiles;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Enemy|Ranged")
+	FIntPoint PendingRangedAttackDirection = FIntPoint::ZeroValue;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Grid")
 	FIntPoint CurrentGridCoord = FIntPoint::ZeroValue;
 
@@ -55,6 +74,9 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Enemy")
 	bool bDead = false;
+
+	UPROPERTY(BlueprintAssignable, Category = "Enemy")
+	FOnGridEnemyKilled OnGridEnemyKilled;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	float MoveDuration = 0.15f;
@@ -86,6 +108,15 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Enemy")
 	bool ExecuteBasicTurn(AGridPawn* PlayerPawn);
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy|Ranged")
+	bool HasPendingRangedAttack() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy|Ranged")
+	bool ResolvePendingRangedAttack(AGridPawn* PlayerPawn);
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy|Ranged")
+	void ClearRangedAimMode();
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Suppression")
 	void OnSuppressedByPlayer(AGridPawn* PlayerPawn);
 
@@ -95,8 +126,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Attack")
 	FEnemyAttackResolveResult ApplyMeleeAttackDamage(AGridPawn* PlayerPawn);
 
+	UFUNCTION(BlueprintCallable, Category = "Enemy|Attack")
+	FEnemyAttackResolveResult ApplyRangedAttackDamage(AGridPawn* PlayerPawn);
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy|Friendly Fire")
+	bool ApplyRangedFriendlyFireDamage(AGridEnemyPawn* TargetEnemy);
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Attack")
 	void OnMeleeAttackResolved(AGridPawn* PlayerPawn, FEnemyAttackResolveResult AttackResult);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Friendly Fire")
+	void OnFriendlyFireResolved(AGridEnemyPawn* OtherEnemy, FEnemyFriendlyFireResolveResult ResolveResult);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Ranged")
+	void OnRangedAimStarted(AGridPawn* PlayerPawn, const TArray<FIntPoint>& AttackTiles);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Ranged")
+	void OnRangedAttackResolved(AGridPawn* PlayerPawn, const TArray<FIntPoint>& AttackTiles, FEnemyAttackResolveResult AttackResult, bool bHitPlayer);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Enemy|Ranged")
+	void OnRangedAimCleared();
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void Kill();
@@ -116,6 +165,12 @@ private:
 	bool bInitializedOnGrid = false;
 	bool bMeleeDamageResolvedInCurrentAttack = false;
 	FEnemyAttackResolveResult LastMeleeAttackResult;
+
+	bool EnterRangedAimMode(AGridPawn* PlayerPawn);
+	bool TryMoveTowardRangedAlignment(AGridPawn* PlayerPawn);
+	bool HasLineOfSightToPlayer(const AGridPawn* PlayerPawn, TArray<FIntPoint>& OutLineTiles, FIntPoint& OutDirection) const;
+	bool BuildRangedLineFromCoord(FIntPoint StartCoord, FIntPoint Direction, TArray<FIntPoint>& OutLineTiles) const;
+	static bool TryGetAxisDirection(FIntPoint FromCoord, FIntPoint ToCoord, FIntPoint& OutDirection);
 
 	void StartAttackReboundVisualMove(const FVector& From, const FVector& BlockedTarget);
 	void ResolveDefeatedPlayerOccupancy(AGridPawn* PlayerPawn);

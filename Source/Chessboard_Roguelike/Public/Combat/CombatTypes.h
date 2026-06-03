@@ -1,7 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Grid/GridTypes.h"
 #include "CombatTypes.generated.h"
+
+UENUM(BlueprintType)
+enum class EEnemyFriendlyFireResolveReason : uint8
+{
+	None UMETA(DisplayName = "None"),
+	SameFaction UMETA(DisplayName = "Same Faction"),
+	RangedDifferentFaction UMETA(DisplayName = "Ranged Different Faction"),
+	ConstructTileKillsAcid UMETA(DisplayName = "Construct Tile Kills Acid"),
+	AcidTileKillsConstruct UMETA(DisplayName = "Acid Tile Kills Construct"),
+	MinimalTileLowerThreshold UMETA(DisplayName = "Minimal Tile Lower Threshold"),
+	MinimalTileEqualThreshold UMETA(DisplayName = "Minimal Tile Equal Threshold")
+};
 
 USTRUCT(BlueprintType)
 struct CHESSBOARD_ROGUELIKE_API FCombatDamage
@@ -76,4 +89,28 @@ struct CHESSBOARD_ROGUELIKE_API FEnemyAttackResolveResult
 
 	UPROPERTY(BlueprintReadOnly, Category = "Combat")
 	int32 RemainingHealth = 0;
+};
+
+USTRUCT(BlueprintType)
+struct CHESSBOARD_ROGUELIKE_API FEnemyFriendlyFireResolveResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bResolved = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bSameFaction = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bAttackerKilled = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bTargetKilled = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	ETileType CollisionTileType = ETileType::Minimal;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	EEnemyFriendlyFireResolveReason Reason = EEnemyFriendlyFireResolveReason::None;
 };

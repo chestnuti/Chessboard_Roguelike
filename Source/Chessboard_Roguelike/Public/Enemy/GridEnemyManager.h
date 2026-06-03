@@ -54,9 +54,13 @@ public:
 	TObjectPtr<AGridPawn> PlayerPawn;
 
 private:
+	UFUNCTION()
+	void HandleEnemyKilled(AGridEnemyPawn* Enemy, FIntPoint DeathCoord, FVector DeathWorldLocation);
+
 	void AutoInitializeReferences();
 	void PruneInvalidEnemies();
 	bool HasMovingEnemies() const;
+	int32 ResolvePendingRangedAttacks(TSet<AGridEnemyPawn*>& OutResolvedAttackers);
 
 	bool bWaitingForEnemyMovement = false;
 };

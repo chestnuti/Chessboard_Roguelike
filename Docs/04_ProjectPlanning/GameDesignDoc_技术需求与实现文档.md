@@ -194,7 +194,7 @@
 1. `BuildRoomGraph`：展开 L-System 字符串，生成房间节点和连接关系。新房间会按半径、`BoundaryNoise` 和 `RoomSeparation` 检查与已有房间的中心距离；如果多次尝试后仍找不到非重叠位置，该节点会被跳过。
 2. `RasterizeLayout`：把房间节点雕刻为不规则房间，把连接关系雕刻为崎岖走廊。房间格发生局部重叠时，Tile 优先保留较低 `Depth` 的房间归属；走廊不会覆盖已有房间、起点或出口的 `RegionId` 和 `Depth`。
 3. `AssignTileTypes`：在可通行格上分配 `Minimal`、`Construct`、`Acid`，墙体固定为 `Obstacle`。
-4. `BuildSpawnCandidates`：生成敌人、事件、奖励候选点，避开起点安全区、墙、出口中心和不可通行格。
+4. `BuildSpawnCandidates`：先从起点执行 Flood Fill 得到可达格集合，再生成敌人、事件、奖励候选点；候选点必须可达，并避开起点安全区、墙、出口中心和不可通行格。
 5. `ValidateConnectivity`：从起点 Flood Fill，确保所有房间中心可达。
 
 生成器失败时会按 `MaxGenerationAttempts` 递增尝试种子重生成；所有随机路径必须使用 `FRandomStream`，禁止使用全局随机函数。
@@ -343,6 +343,14 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 默认 `AttackDamage = 1`；`bApplyFactionAttributeDamage = true` 时，构成敌人扣玩家构成值，酸性敌人扣玩家酸性值。
 - 如果玩家 HP 归零，`AGridEnemyManager::ExecuteEnemyTurn()` 中断后续敌人行动，并设置 `ETurnState::Defeat`。
 
+敌人友伤：
+
+- `UCombatResolverComponent::ResolveEnemyMeleeCollision()` 负责结算两个敌人在同一目标格发生的近战冲突，只返回 `FEnemyFriendlyFireResolveResult`，不直接修改 Actor 或格子。
+- `AGridEnemyPawn::TryMoveToGridCoord()` 在目标格被敌人占据时调用近战友伤结算；同阵营不造成伤害，异阵营按目标格地块类型决定死亡结果。
+- 目标死亡且攻击者存活时，攻击者通过 `AGridManager::RequestMove()` 进入目标格；攻击者死亡时清空自身源格；双方死亡时清空双方占据。
+- `UCombatResolverComponent::ResolveEnemyRangedFriendlyFire()` 提供远程友伤结算入口；`AGridEnemyPawn::ApplyRangedFriendlyFireDamage()` 会对异阵营目标执行直接击杀和占位清理。
+- 友伤表现入口为 `AGridEnemyPawn::OnFriendlyFireResolved()`。当前已实现基础直接结算和远程敌人两阶段瞄准/开火；远程同窗口互击同步死亡调度、跨阵营清除链的队列化表现仍属于后续扩展。
+
 ---
 
 ## 8. 敌人系统技术需求
@@ -371,13 +379,13 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 
 - 可攻击则攻击
 - 不可攻击则移动
-- 远程敌人优先执行四向直线攻击；若玩家不在攻击线内，则追逐玩家
+- 远程敌人优先与玩家在 X/Y 轴对齐；同轴且中间无 Obstacle 时进入瞄准模式，下一次敌方回合开始时结算锁定攻击线
 
 当前工程默认近战 AI：
 
 - 敌人与玩家曼哈顿距离为 1 时执行近战攻击。
 - 敌人被玩家当前满值属性压制时，不执行主动攻击。
-- 不相邻时沿曼哈顿距离更大的轴尝试靠近玩家。
+- 不相邻时通过四方向 A* 计算到玩家格的路径，并尝试移动到路径上的下一格。
 - 若玩家 HP 在敌方回合中归零，本轮敌人行动立即停止。
 
 ### 8.4 远程敌人状态机
@@ -385,22 +393,22 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 推荐状态：
 
 - `Idle`
-- `Aiming`
-- `Fire`
-- `Recover`
+- `AimingRangedAttack`
 
 基础行为：
 
-- 第 1 回合进入瞄准状态并移动一次
-- 第 2 回合释放四向直线攻击且不移动
-- 若玩家不在攻击线内，则转为追逐状态
+- 当远程敌人与玩家处于同一 X 轴或 Y 轴，且中间无 `Obstacle` 时，进入 `AimingRangedAttack` 并显示锁定攻击线
+- 锁定攻击线从敌人相邻格开始，沿瞄准方向延伸到地图边界或 `Obstacle` 前一格
+- 下一次敌方回合开始时优先结算上一回合锁定的攻击线，结算后清除瞄准状态与攻击范围提示
+- 若玩家已经离开锁定攻击线，则不会受到伤害
+- 若无法瞄准玩家，远程敌人优先移动到能与玩家同 X/Y 轴且无遮挡的位置；没有可用目标时再回退到基础靠近逻辑
 
 ### 8.5 AI 选择逻辑
 
 最小可用方案建议采用优先级驱动，而非复杂行为树：
 
-- 优先攻击可命中的玩家
-- 否则朝玩家最短路径移动
+- 近战敌人优先攻击相邻玩家，否则朝玩家最短路径移动
+- 远程敌人优先进入瞄准/结算流程，否则寻找对齐位置
 - 远程单位优先维持射击节奏
 
 若使用行为树，也应保持节点简洁，避免原型阶段过度工程化。
@@ -535,6 +543,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `OnPlayerHealthChanged`
 - `OnPlayerDefeated`
 - `OnEnemyMeleeAttackResolved`
+- `OnEnemyFriendlyFireResolved`
 - `OnTileChanged`
 - `OnValueChanged`
 - `OnEnemyKilled`
@@ -571,7 +580,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 
 - 完成 PCG 可达性校验
 - 完成远程敌人蓄力逻辑
-- 完成友伤与压制状态
+- 完成友伤清除链表现与压制状态反馈
 - 完成基础 UI 和反馈
 - 完成房间级胜负流转
 - 完成多房间激活与无缝推进

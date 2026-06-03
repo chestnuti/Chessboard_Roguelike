@@ -485,6 +485,55 @@ namespace
 		return FMath::Abs(Coord.X - Layout.StartCoord.X) + FMath::Abs(Coord.Y - Layout.StartCoord.Y) > SafetyDistance;
 	}
 
+	bool BuildReachableTileSet(const FGeneratedDungeonLayout& Layout, TSet<FIntPoint>& OutReachableTiles)
+	{
+		OutReachableTiles.Reset();
+		if (Layout.Width <= 0 || Layout.Height <= 0 || Layout.Tiles.Num() != Layout.Width * Layout.Height || !IsInBounds(Layout.StartCoord, Layout.Width, Layout.Height))
+		{
+			return false;
+		}
+
+		const FGridTileLayoutData& StartTile = Layout.Tiles[GetTileIndex(Layout.StartCoord, Layout.Width)];
+		if (!StartTile.bWalkable || StartTile.CellRole == EGridCellRole::Wall || StartTile.TileType == ETileType::Obstacle)
+		{
+			return false;
+		}
+
+		TArray<FIntPoint> Queue;
+		OutReachableTiles.Add(Layout.StartCoord);
+		Queue.Add(Layout.StartCoord);
+
+		for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
+		{
+			const FIntPoint Current = Queue[QueueIndex];
+			const FIntPoint Neighbors[] = {
+				Current + FIntPoint(1, 0),
+				Current + FIntPoint(-1, 0),
+				Current + FIntPoint(0, 1),
+				Current + FIntPoint(0, -1)
+			};
+
+			for (const FIntPoint& Neighbor : Neighbors)
+			{
+				if (!IsInBounds(Neighbor, Layout.Width, Layout.Height) || OutReachableTiles.Contains(Neighbor))
+				{
+					continue;
+				}
+
+				const FGridTileLayoutData& Tile = Layout.Tiles[GetTileIndex(Neighbor, Layout.Width)];
+				if (!Tile.bWalkable || Tile.CellRole == EGridCellRole::Wall || Tile.TileType == ETileType::Obstacle)
+				{
+					continue;
+				}
+
+				OutReachableTiles.Add(Neighbor);
+				Queue.Add(Neighbor);
+			}
+		}
+
+		return true;
+	}
+
 	void AddCandidate(TArray<FDungeonSpawnCandidate>& Candidates, const FGridTileLayoutData& Tile)
 	{
 		FDungeonSpawnCandidate Candidate;
@@ -497,10 +546,22 @@ namespace
 	void BuildSpawnCandidates(const UDungeonGenerationSettings& Settings, FRandomStream& Stream, FGeneratedDungeonLayout& Layout)
 	{
 		// Stage 4: produce data-only spawn candidates; actual Actor spawning belongs to DungeonRunManager.
+		TSet<FIntPoint> ReachableTiles;
+		if (!BuildReachableTileSet(Layout, ReachableTiles))
+		{
+			UE_LOG(LogLSystemDungeonGenerator, Verbose, TEXT("BuildSpawnCandidates skipped: no reachable tile set for seed=%d."), Layout.Seed);
+			return;
+		}
+
 		TArray<FGridTileLayoutData> CandidateTiles;
 		for (const FGridTileLayoutData& Tile : Layout.Tiles)
 		{
 			if (!Tile.bWalkable || Tile.CellRole == EGridCellRole::Wall || Tile.CellRole == EGridCellRole::Start || Tile.GridCoord == Layout.ExitCoord)
+			{
+				continue;
+			}
+
+			if (!ReachableTiles.Contains(Tile.GridCoord))
 			{
 				continue;
 			}
@@ -611,42 +672,10 @@ bool ULSystemDungeonGenerator::GenerateDungeonLayout(const UDungeonGenerationSet
 
 bool ULSystemDungeonGenerator::ValidateConnectivity(const FGeneratedDungeonLayout& Layout)
 {
-	if (Layout.Width <= 0 || Layout.Height <= 0 || Layout.Tiles.Num() != Layout.Width * Layout.Height || !IsInBounds(Layout.StartCoord, Layout.Width, Layout.Height))
+	TSet<FIntPoint> Visited;
+	if (!BuildReachableTileSet(Layout, Visited))
 	{
 		return false;
-	}
-
-	TSet<FIntPoint> Visited;
-	TArray<FIntPoint> Queue;
-	Visited.Add(Layout.StartCoord);
-	Queue.Add(Layout.StartCoord);
-
-	for (int32 QueueIndex = 0; QueueIndex < Queue.Num(); ++QueueIndex)
-	{
-		const FIntPoint Current = Queue[QueueIndex];
-		const FIntPoint Neighbors[] = {
-			Current + FIntPoint(1, 0),
-			Current + FIntPoint(-1, 0),
-			Current + FIntPoint(0, 1),
-			Current + FIntPoint(0, -1)
-		};
-
-		for (const FIntPoint& Neighbor : Neighbors)
-		{
-			if (!IsInBounds(Neighbor, Layout.Width, Layout.Height) || Visited.Contains(Neighbor))
-			{
-				continue;
-			}
-
-			const FGridTileLayoutData& Tile = Layout.Tiles[GetTileIndex(Neighbor, Layout.Width)];
-			if (!Tile.bWalkable || Tile.CellRole == EGridCellRole::Wall || Tile.TileType == ETileType::Obstacle)
-			{
-				continue;
-			}
-
-			Visited.Add(Neighbor);
-			Queue.Add(Neighbor);
-		}
 	}
 
 	int32 ReachableRoomCount = 0;

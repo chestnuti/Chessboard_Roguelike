@@ -130,3 +130,101 @@ FEnemyAttackResolveResult UCombatResolverComponent::ResolveEnemyMeleeAttack(
 	Result.bDamageApplied = Result.AppliedHealthDamage > 0 || Result.AppliedConstructDelta != 0 || Result.AppliedAcidDelta != 0;
 	return Result;
 }
+
+FEnemyFriendlyFireResolveResult UCombatResolverComponent::ResolveEnemyRangedFriendlyFire(
+	const AGridEnemyPawn* Attacker,
+	const AGridEnemyPawn* TargetEnemy)
+{
+	FEnemyFriendlyFireResolveResult Result;
+	if (!Attacker || !TargetEnemy)
+	{
+		UE_LOG(LogCombatResolver, Warning, TEXT("ResolveEnemyRangedFriendlyFire failed: Attacker or TargetEnemy is null."));
+		return Result;
+	}
+
+	if (!Attacker->IsAlive() || !TargetEnemy->IsAlive())
+	{
+		return Result;
+	}
+
+	Result.bResolved = true;
+	if (Attacker->Faction == TargetEnemy->Faction)
+	{
+		Result.bSameFaction = true;
+		Result.Reason = EEnemyFriendlyFireResolveReason::SameFaction;
+		return Result;
+	}
+
+	Result.bTargetKilled = true;
+	Result.Reason = EEnemyFriendlyFireResolveReason::RangedDifferentFaction;
+	return Result;
+}
+
+FEnemyFriendlyFireResolveResult UCombatResolverComponent::ResolveEnemyMeleeCollision(
+	const AGridEnemyPawn* Attacker,
+	const AGridEnemyPawn* TargetEnemy,
+	ETileType CollisionTileType)
+{
+	FEnemyFriendlyFireResolveResult Result;
+	Result.CollisionTileType = CollisionTileType;
+
+	if (!Attacker || !TargetEnemy)
+	{
+		UE_LOG(LogCombatResolver, Warning, TEXT("ResolveEnemyMeleeCollision failed: Attacker or TargetEnemy is null."));
+		return Result;
+	}
+
+	if (!Attacker->IsAlive() || !TargetEnemy->IsAlive())
+	{
+		return Result;
+	}
+
+	Result.bResolved = true;
+	if (Attacker->Faction == TargetEnemy->Faction)
+	{
+		Result.bSameFaction = true;
+		Result.Reason = EEnemyFriendlyFireResolveReason::SameFaction;
+		return Result;
+	}
+
+	switch (CollisionTileType)
+	{
+	case ETileType::Construct:
+		Result.bAttackerKilled = Attacker->Faction == EEnemyFaction::Acid;
+		Result.bTargetKilled = TargetEnemy->Faction == EEnemyFaction::Acid;
+		Result.Reason = EEnemyFriendlyFireResolveReason::ConstructTileKillsAcid;
+		break;
+
+	case ETileType::Acid:
+		Result.bAttackerKilled = Attacker->Faction == EEnemyFaction::Construct;
+		Result.bTargetKilled = TargetEnemy->Faction == EEnemyFaction::Construct;
+		Result.Reason = EEnemyFriendlyFireResolveReason::AcidTileKillsConstruct;
+		break;
+
+	case ETileType::Minimal:
+	default:
+	{
+		const int32 AttackerThreshold = FMath::Max(1, Attacker->KillThreshold);
+		const int32 TargetThreshold = FMath::Max(1, TargetEnemy->KillThreshold);
+		if (AttackerThreshold < TargetThreshold)
+		{
+			Result.bAttackerKilled = true;
+			Result.Reason = EEnemyFriendlyFireResolveReason::MinimalTileLowerThreshold;
+		}
+		else if (TargetThreshold < AttackerThreshold)
+		{
+			Result.bTargetKilled = true;
+			Result.Reason = EEnemyFriendlyFireResolveReason::MinimalTileLowerThreshold;
+		}
+		else
+		{
+			Result.bAttackerKilled = true;
+			Result.bTargetKilled = true;
+			Result.Reason = EEnemyFriendlyFireResolveReason::MinimalTileEqualThreshold;
+		}
+		break;
+	}
+	}
+
+	return Result;
+}
