@@ -69,10 +69,17 @@ void UCombatCameraDirectorComponent::FocusGridTileBriefly(const FVector& TargetW
 	StartArmLength = SpringArm->TargetArmLength;
 	FocusTargetOffset = CalculateFocusTargetOffset(SpringArm, TargetWorldLocation);
 	FocusArmLength = FMath::Max(0.f, RestArmLength - ZoomInDistance);
+
+	const float DistanceAlpha = CalculateFocusDistanceAlpha(SpringArm, TargetWorldLocation);
+	RuntimeFocusInDuration = FocusInDuration + ExtraFocusInDurationAtMaxDistance * DistanceAlpha;
+	RuntimeFocusHoldDuration = FocusHoldDuration + ExtraFocusHoldDurationAtMaxDistance * DistanceAlpha;
+	RuntimeFocusOutDuration = FocusOutDuration;
+
 	ElapsedRealTime = 0.f;
 	LastRealTimeSeconds = World->GetRealTimeSeconds();
 	bFocusActive = true;
 
+	CacheAndDisableSpringArmLag(SpringArm);
 	SetComponentTickEnabled(true);
 }
 
@@ -82,11 +89,16 @@ void UCombatCameraDirectorComponent::StopFocus()
 	{
 		SpringArm->TargetOffset = RestTargetOffset;
 		SpringArm->TargetArmLength = RestArmLength;
+		RestoreSpringArmLag(SpringArm);
 	}
 
+	RuntimeFocusInDuration = 0.f;
+	RuntimeFocusHoldDuration = 0.f;
+	RuntimeFocusOutDuration = 0.f;
 	ElapsedRealTime = 0.f;
 	LastRealTimeSeconds = 0.0;
 	bFocusActive = false;
+	bHasCachedSpringArmLagSettings = false;
 	ActiveSpringArm.Reset();
 	SetComponentTickEnabled(false);
 }
@@ -137,9 +149,26 @@ FVector UCombatCameraDirectorComponent::CalculateFocusTargetOffset(
 	return RestTargetOffset + PlanarDelta * FocusOffsetScale;
 }
 
+float UCombatCameraDirectorComponent::CalculateFocusDistanceAlpha(
+	const USpringArmComponent* SpringArm,
+	const FVector& TargetWorldLocation) const
+{
+	if (!SpringArm || MaxFocusOffset <= KINDA_SMALL_NUMBER)
+	{
+		return 0.f;
+	}
+
+	const AActor* OwnerActor = GetOwner();
+	const APlayerController* PlayerController = Cast<APlayerController>(OwnerActor);
+	const AActor* OriginActor = PlayerController ? PlayerController->GetPawn() : OwnerActor;
+	const FVector OriginLocation = OriginActor ? OriginActor->GetActorLocation() : SpringArm->GetComponentLocation();
+
+	return FMath::Clamp(FVector::Dist2D(OriginLocation, TargetWorldLocation) / MaxFocusOffset, 0.f, 1.f);
+}
+
 float UCombatCameraDirectorComponent::GetTotalDuration() const
 {
-	return FocusInDuration + FocusHoldDuration + FocusOutDuration;
+	return RuntimeFocusInDuration + RuntimeFocusHoldDuration + RuntimeFocusOutDuration;
 }
 
 void UCombatCameraDirectorComponent::ApplyFocusState(float Alpha)
@@ -150,24 +179,24 @@ void UCombatCameraDirectorComponent::ApplyFocusState(float Alpha)
 		return;
 	}
 
-	const float InEnd = FocusInDuration;
-	const float HoldEnd = FocusInDuration + FocusHoldDuration;
+	const float InEnd = RuntimeFocusInDuration;
+	const float HoldEnd = RuntimeFocusInDuration + RuntimeFocusHoldDuration;
 	const float TotalDuration = GetTotalDuration();
 	const float CurrentTime = Alpha * TotalDuration;
 
 	FVector NewTargetOffset = FocusTargetOffset;
 	float NewArmLength = FocusArmLength;
 
-	if (FocusInDuration > KINDA_SMALL_NUMBER && CurrentTime < InEnd)
+	if (RuntimeFocusInDuration > KINDA_SMALL_NUMBER && CurrentTime < InEnd)
 	{
-		float BlendAlpha = FMath::Clamp(CurrentTime / FocusInDuration, 0.f, 1.f);
+		float BlendAlpha = FMath::Clamp(CurrentTime / RuntimeFocusInDuration, 0.f, 1.f);
 		BlendAlpha = BlendAlpha * BlendAlpha * (3.f - 2.f * BlendAlpha);
 		NewTargetOffset = FMath::Lerp(StartTargetOffset, FocusTargetOffset, BlendAlpha);
 		NewArmLength = FMath::Lerp(StartArmLength, FocusArmLength, BlendAlpha);
 	}
-	else if (FocusOutDuration > KINDA_SMALL_NUMBER && CurrentTime > HoldEnd)
+	else if (RuntimeFocusOutDuration > KINDA_SMALL_NUMBER && CurrentTime > HoldEnd)
 	{
-		float OutAlpha = FMath::Clamp((CurrentTime - HoldEnd) / FocusOutDuration, 0.f, 1.f);
+		float OutAlpha = FMath::Clamp((CurrentTime - HoldEnd) / RuntimeFocusOutDuration, 0.f, 1.f);
 		OutAlpha = OutAlpha * OutAlpha * (3.f - 2.f * OutAlpha);
 		NewTargetOffset = FMath::Lerp(FocusTargetOffset, RestTargetOffset, OutAlpha);
 		NewArmLength = FMath::Lerp(FocusArmLength, RestArmLength, OutAlpha);
@@ -175,4 +204,37 @@ void UCombatCameraDirectorComponent::ApplyFocusState(float Alpha)
 
 	SpringArm->TargetOffset = NewTargetOffset;
 	SpringArm->TargetArmLength = NewArmLength;
+}
+
+void UCombatCameraDirectorComponent::CacheAndDisableSpringArmLag(USpringArmComponent* SpringArm)
+{
+	if (!SpringArm || !bDisableSpringArmLagDuringFocus)
+	{
+		return;
+	}
+
+	if (!bHasCachedSpringArmLagSettings)
+	{
+		bRestCameraLagEnabled = SpringArm->bEnableCameraLag;
+		bRestCameraRotationLagEnabled = SpringArm->bEnableCameraRotationLag;
+		RestCameraLagSpeed = SpringArm->CameraLagSpeed;
+		RestCameraRotationLagSpeed = SpringArm->CameraRotationLagSpeed;
+		bHasCachedSpringArmLagSettings = true;
+	}
+
+	SpringArm->bEnableCameraLag = false;
+	SpringArm->bEnableCameraRotationLag = false;
+}
+
+void UCombatCameraDirectorComponent::RestoreSpringArmLag(USpringArmComponent* SpringArm)
+{
+	if (!SpringArm || !bHasCachedSpringArmLagSettings)
+	{
+		return;
+	}
+
+	SpringArm->bEnableCameraLag = bRestCameraLagEnabled;
+	SpringArm->bEnableCameraRotationLag = bRestCameraRotationLagEnabled;
+	SpringArm->CameraLagSpeed = RestCameraLagSpeed;
+	SpringArm->CameraRotationLagSpeed = RestCameraRotationLagSpeed;
 }

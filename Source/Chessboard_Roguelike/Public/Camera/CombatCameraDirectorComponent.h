@@ -26,6 +26,12 @@ public:
 	float FocusOutDuration = 0.18f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
+	float ExtraFocusInDurationAtMaxDistance = 0.16f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
+	float ExtraFocusHoldDurationAtMaxDistance = 0.22f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
 	float MaxFocusOffset = 650.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
@@ -33,6 +39,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
 	float ZoomInDistance = 300.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera")
+	bool bDisableSpringArmLagDuringFocus = true;
 
 	UFUNCTION(BlueprintCallable, Category = "Combat Camera")
 	void FocusGridTileBriefly(const FVector& TargetWorldLocation);
@@ -50,12 +59,23 @@ private:
 	float RestArmLength = 0.f;
 	float StartArmLength = 0.f;
 	float FocusArmLength = 0.f;
+	float RuntimeFocusInDuration = 0.f;
+	float RuntimeFocusHoldDuration = 0.f;
+	float RuntimeFocusOutDuration = 0.f;
 	float ElapsedRealTime = 0.f;
 	double LastRealTimeSeconds = 0.0;
+	float RestCameraLagSpeed = 0.f;
+	float RestCameraRotationLagSpeed = 0.f;
 	bool bFocusActive = false;
+	bool bRestCameraLagEnabled = false;
+	bool bRestCameraRotationLagEnabled = false;
+	bool bHasCachedSpringArmLagSettings = false;
 
 	USpringArmComponent* FindSpringArm();
 	FVector CalculateFocusTargetOffset(const USpringArmComponent* SpringArm, const FVector& TargetWorldLocation) const;
+	float CalculateFocusDistanceAlpha(const USpringArmComponent* SpringArm, const FVector& TargetWorldLocation) const;
 	float GetTotalDuration() const;
 	void ApplyFocusState(float Alpha);
+	void CacheAndDisableSpringArmLag(USpringArmComponent* SpringArm);
+	void RestoreSpringArmLag(USpringArmComponent* SpringArm);
 };
