@@ -11,6 +11,7 @@
 #include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
 #include "Grid/TileEffectResolverComponent.h"
+#include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridPawn, Log, All);
@@ -47,6 +48,7 @@ AGridPawn::AGridPawn()
 	PlayerAttributeComponent = CreateDefaultSubobject<UPlayerAttributeComponent>(TEXT("PlayerAttributeComponent"));
 	TileEffectResolverComponent = CreateDefaultSubobject<UTileEffectResolverComponent>(TEXT("TileEffectResolverComponent"));
 	CombatResolverComponent = CreateDefaultSubobject<UCombatResolverComponent>(TEXT("CombatResolverComponent"));
+	ConversionEnergyComponent = CreateDefaultSubobject<UConversionEnergyComponent>(TEXT("ConversionEnergyComponent"));
 }
 
 void AGridPawn::BeginPlay()
@@ -303,6 +305,10 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 			TileEffectResolverComponent->ResolveTileEnterEffect(this, CurrentGridCoord);
 		}
 
+		if (ConversionEnergyComponent)
+		{
+			ConversionEnergyComponent->GrantConversionEnergy(DroppedEnergyType);
+		}
 		OnPlayerKilledEnemy(EnemyActor, DroppedEnergyType);
 
 		TurnManager->AddStep();

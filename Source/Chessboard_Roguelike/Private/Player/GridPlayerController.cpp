@@ -5,6 +5,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "Player/ConversionEnergyComponent.h"
 #include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
 #include "UI/PlayerAttributeHUDWidget.h"
@@ -53,7 +54,8 @@ void AGridPlayerController::EndConversionEnergyCameraZoom()
 
 bool AGridPlayerController::CanStartConversionEnergyCameraZoom_Implementation() const
 {
-	return true;
+	const AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
+	return GridPawn && GridPawn->ConversionEnergyComponent && GridPawn->ConversionEnergyComponent->HasConversionEnergy();
 }
 
 void AGridPlayerController::BeginPlay()

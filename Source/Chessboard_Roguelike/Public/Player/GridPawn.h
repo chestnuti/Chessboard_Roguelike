@@ -10,6 +10,7 @@ class ATurnManager;
 class AGridEnemyPawn;
 class AGridEnemyManager;
 class UCombatResolverComponent;
+class UConversionEnergyComponent;
 class UStaticMeshComponent;
 class USceneComponent;
 class UPlayerAttributeComponent;
@@ -40,6 +41,10 @@ public:
 	// Resolves melee attacks without owning grid occupancy changes.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCombatResolverComponent> CombatResolverComponent;
+
+	// Owns the player's single-slot tile conversion energy state.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UConversionEnergyComponent> ConversionEnergyComponent;
 
 	// Authoritative logical position for movement and validation.
 	UPROPERTY(BlueprintReadOnly, Category = "Grid")
@@ -75,7 +80,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	void TryMove(FIntPoint Direction);
 
-	// Blueprint owns prototype energy storage; C++ only exposes the authoritative kill result.
+	// Presentation hook kept for Blueprint feedback after C++ grants conversion energy.
 	UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
 	void OnPlayerKilledEnemy(AGridEnemyPawn* KilledEnemy, ETileType DroppedEnergyType);
 

@@ -36,7 +36,7 @@ Source/Chessboard_Roguelike/Private/Camera/CombatCameraDirectorComponent.cpp
 | `StopFocus()` | `UCombatCameraDirectorComponent` | 立即恢复相机原始状态并停止聚焦 |
 | `BeginConversionEnergyCameraZoom()` | `AGridPlayerController` | 蓝图可调用入口，开始地块转换能量长按缩放 |
 | `EndConversionEnergyCameraZoom()` | `AGridPlayerController` | 蓝图可调用入口，结束地块转换能量长按缩放并快速回弹 |
-| `CanStartConversionEnergyCameraZoom()` | `AGridPlayerController` | 蓝图可覆写判断，建议返回当前是否持有转换能量 |
+| `CanStartConversionEnergyCameraZoom()` | `AGridPlayerController` | 默认从受控 `AGridPawn` 的 `ConversionEnergyComponent` 查询是否持有转换能量，可由蓝图覆写 |
 | `BeginConversionEnergyZoom()` | `UCombatCameraDirectorComponent` | 相机组件内部入口，缓慢拉近 SpringArm |
 | `EndConversionEnergyZoom()` | `UCombatCameraDirectorComponent` | 相机组件内部入口，快速恢复 SpringArm 臂长 |
 
@@ -94,7 +94,7 @@ RuntimeFocusOutDuration = FocusOutDuration
 3. 能量实际使用成功、输入 `Triggered`、`Completed` 或 `Canceled` 时，调用 `AGridPlayerController::EndConversionEnergyCameraZoom()`。
 4. 组件用 `ConversionEnergyZoomOutDuration` 快速恢复到长按前的 SpringArm 臂长。
 
-如果在 C++ 中为 `UseEnergyAction` 赋值，`AGridPlayerController` 会自动绑定 `Started`、`Triggered`、`Completed` 和 `Canceled`。其中 `Started` 会先调用 `CanStartConversionEnergyCameraZoom()`；建议在 `BP_GridPlayerController` 中覆写该函数，并返回玩家当前的 `bHasConversionEnergy`。如果能量逻辑仍完全在 `BP_GridPawn` 的输入图中，也可以不赋值 `UseEnergyAction`，直接在已有蓝图输入链路中调用 Begin/End 两个函数。
+如果在 C++ 中为 `UseEnergyAction` 赋值，`AGridPlayerController` 会自动绑定 `Started`、`Triggered`、`Completed` 和 `Canceled`。其中 `Started` 会先调用 `CanStartConversionEnergyCameraZoom()`；默认实现会从受控 `AGridPawn` 的 `ConversionEnergyComponent` 查询是否持有能量。如果能量输入逻辑仍完全在 `BP_GridPawn` 的输入图中，也可以不赋值 `UseEnergyAction`，直接在已有蓝图输入链路中调用 Begin/End 两个函数。
 
 转换能量缩放与死亡地块聚焦共享同一个 SpringArm。死亡聚焦优先级更高，会打断正在进行的转换能量缩放；转换能量缩放开始时也会停止未完成的死亡聚焦，避免两个效果同时改写 `TargetArmLength`。
 
@@ -120,4 +120,4 @@ RuntimeFocusOutDuration = FocusOutDuration
 6. 如果聚焦停留太短，调高 `ExtraFocusHoldDurationAtMaxDistance` 或 `FocusHoldDuration`。
 7. 如果聚焦幅度太小，调高 `FocusOffsetScale` 或 `MaxFocusOffset`；如果太晃，降低两者或缩短 `ZoomInDistance`。
 8. 如果长按空格没有拉近镜头，检查 `UseEnergyAction` 是否在 `BP_GridPlayerController` 中赋值，或现有蓝图输入链路是否调用了 `BeginConversionEnergyCameraZoom()`。
-9. 如果没有能量时也触发了缩放，覆写 `CanStartConversionEnergyCameraZoom()`，让它返回当前 `bHasConversionEnergy`。
+9. 如果没有能量时也触发了缩放，检查玩家 Pawn 是否已迁移到 `ConversionEnergyComponent`，或覆写 `CanStartConversionEnergyCameraZoom()` 做额外限制。

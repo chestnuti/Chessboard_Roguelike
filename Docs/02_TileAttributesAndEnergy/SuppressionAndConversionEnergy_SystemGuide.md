@@ -13,13 +13,13 @@
 任务 9：实现地块转换能量掉落与单槽持有。
 
 - 玩家击杀敌人后，C++ 广播击杀成功事件。
-- 蓝图负责保存单槽能量、替换旧能量和刷新 UI。
-- C++ 不直接持有玩家的转换能量状态，便于原型阶段在 `BP_GridPawn` 中快速调整。
+- `UConversionEnergyComponent` 负责保存单槽能量、替换旧能量、消费能量和广播状态变化。
+- 蓝图负责刷新 UI、播放反馈，以及在使用能量时调用组件 API。
 
 任务 10：实现能量使用与 3x3 地块转换。
 
 - 蓝图负责切换玩家手动指定的目标地块类型。
-- 蓝图负责校验当前是否持有转换能量，并在转换成功后消费能量。
+- 蓝图通过 `UConversionEnergyComponent::HasConversionEnergy()` 校验当前是否持有转换能量，并在转换成功后调用 `ConsumeConversionEnergy()`。
 - C++ 负责执行以玩家当前格为中心的 3x3 地块转换。
 
 ## 相关文件
@@ -28,10 +28,12 @@
 | --- | --- |
 | `Source/Chessboard_Roguelike/Public/Player/PlayerAttributeComponent.h` | 暴露玩家属性和压制查询接口 |
 | `Source/Chessboard_Roguelike/Private/Player/PlayerAttributeComponent.cpp` | 实现满值判断和阵营压制规则 |
+| `Source/Chessboard_Roguelike/Public/Player/ConversionEnergyComponent.h` | 暴露转换能量单槽状态、授予、消费和事件接口 |
+| `Source/Chessboard_Roguelike/Private/Player/ConversionEnergyComponent.cpp` | 实现转换能量状态变更和事件广播 |
 | `Source/Chessboard_Roguelike/Public/Enemy/GridEnemyPawn.h` | 暴露敌人压制查询和蓝图表现事件 |
 | `Source/Chessboard_Roguelike/Private/Enemy/GridEnemyPawn.cpp` | 在敌人行动入口执行压制判定 |
-| `Source/Chessboard_Roguelike/Public/Player/GridPawn.h` | 暴露玩家击杀敌人事件给蓝图 |
-| `Source/Chessboard_Roguelike/Private/Player/GridPawn.cpp` | 在击杀成功分支计算掉落能量类型并触发事件；执行 3x3 地块转换 |
+| `Source/Chessboard_Roguelike/Public/Player/GridPawn.h` | 持有玩家属性、战斗、地块效果和转换能量组件；暴露玩家击杀敌人事件给蓝图 |
+| `Source/Chessboard_Roguelike/Private/Player/GridPawn.cpp` | 在击杀成功分支计算掉落能量类型、授予转换能量并触发事件；执行 3x3 地块转换 |
 
 ## 压制规则
 
@@ -111,32 +113,46 @@ void OnPlayerKilledEnemy(AGridEnemyPawn* KilledEnemy, ETileType DroppedEnergyTyp
 | `EEnemyFaction::Construct` | `ETileType::Construct` |
 | `EEnemyFaction::Acid` | `ETileType::Acid` |
 
-当前 C++ 只负责通知击杀成功和掉落类型，不保存能量。
+击杀成功时，C++ 会先调用 `ConversionEnergyComponent->GrantConversionEnergy(DroppedEnergyType)`，再触发 `OnPlayerKilledEnemy` 供蓝图播放获得能量反馈或刷新 UI。
 
-## BP_GridPawn 推荐实现
+## 转换能量组件
 
-在 `BP_GridPawn` 中添加单槽能量变量：
+类：`UConversionEnergyComponent`
 
-| 变量 | 类型 | 用途 |
+默认挂载位置：`AGridPawn::ConversionEnergyComponent`
+
+该组件是转换能量的权威运行时存储。`BP_GridPawn` 中原型阶段的 `hasEnergy` / `bHasConversionEnergy` 变量应迁移为读取该组件。
+
+### 运行时状态
+
+| 字段 | 类型 | 用途 |
 | --- | --- | --- |
 | `bHasConversionEnergy` | `bool` | 当前是否持有转换能量 |
 | `HeldConversionEnergyType` | `ETileType` | 当前持有的转换能量类型 |
-| `LastReplacedEnergyType` | `ETileType`，可选 | UI 或调试表现用 |
 
-推荐封装蓝图函数：
+### 蓝图可调用函数
 
-| 函数 | 用途 |
-| --- | --- |
-| `GrantConversionEnergy(NewEnergyType)` | 获得或替换当前单槽能量 |
-| `HasConversionEnergy()` | 返回是否持有能量 |
-| `GetHeldConversionEnergyType()` | 返回当前能量类型 |
-| `ConsumeConversionEnergy()` | 第 10 项使用能量后清空单槽 |
+| 函数 | 返回 | 用途 |
+| --- | --- | --- |
+| `GrantConversionEnergy(NewEnergyType)` | 无 | 获得或替换当前单槽能量。当前只接受 `Construct` 和 `Acid` |
+| `HasConversionEnergy()` | `bool` | 返回是否持有能量 |
+| `GetHeldConversionEnergyType()` | `ETileType` | 返回当前能量类型；没有能量时返回 `Minimal` |
+| `ConsumeConversionEnergy()` | `bool` | 有能量时消费并清空单槽，成功返回 `true` |
+| `ClearConversionEnergy()` | 无 | 强制清空能量，用于重置、读档或调试 |
+
+### 事件
+
+| 事件 | 参数 | 触发时机 |
+| --- | --- | --- |
+| `OnConversionEnergyChanged` | `bHasEnergy`, `EnergyType` | 能量有无或持有类型变化时 |
+| `OnConversionEnergyGranted` | `EnergyType` | 获得或替换有效能量时 |
+| `OnConversionEnergyConsumed` | `EnergyType` | 成功消费能量时 |
 
 `OnPlayerKilledEnemy` 蓝图事件推荐流程：
 
 1. 接收 `KilledEnemy` 和 `DroppedEnergyType`。
-2. 判断 `DroppedEnergyType` 是否为 `Construct` 或 `Acid`。
-3. 调用 `GrantConversionEnergy(DroppedEnergyType)`。
+2. 不再修改蓝图本地 `hasEnergy`。
+3. 从 `ConversionEnergyComponent` 读取 `HasConversionEnergy()` 和 `GetHeldConversionEnergyType()`。
 4. 刷新 HUD 或播放获得能量反馈。
 
 ## 3x3 地块转换
@@ -146,7 +162,7 @@ void OnPlayerKilledEnemy(AGridEnemyPawn* KilledEnemy, ETileType DroppedEnergyTyp
 蓝图负责：
 
 - `SwitchConversionTileType`：切换玩家手动指定的转换目标地块类型。
-- `TryUseConversionEnergy`：检查是否持有能量，调用 C++ 转换函数，并在转换成功后消费能量。
+- `TryUseConversionEnergy`：通过 `ConversionEnergyComponent` 检查是否持有能量，调用 C++ 转换函数，并在转换成功后消费能量。
 - 输入控制：项目已配置能量使用和地块类型切换相关输入。
 
 C++ 负责：
@@ -194,11 +210,11 @@ bool ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType);
 
 输入使用能量
 -> TryUseConversionEnergy
--> 检查 bHasConversionEnergy
+-> ConversionEnergyComponent.HasConversionEnergy
 -> BeginConversionEnergyCameraZoom（长按开始时，仅当持有能量）
--> 读取当前目标 ETileType
+-> 读取 ConversionEnergyComponent.GetHeldConversionEnergyType 或当前手动目标 ETileType
 -> ConvertAreaAroundPlayer(GridManager, TargetTileType)
--> 返回 true 时 ConsumeConversionEnergy
+-> 返回 true 时 ConversionEnergyComponent.ConsumeConversionEnergy
 -> EndConversionEnergyCameraZoom（使用成功、输入完成或取消时）
 -> 刷新 HUD / 播放反馈
 ```
@@ -209,11 +225,21 @@ bool ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType);
 
 玩家持有转换能量时，长按空格可以触发地块转换能量相机缩放：
 
-1. 在增强输入 `Started` 或现有长按开始节点中，先检查 `bHasConversionEnergy`。
+1. 在增强输入 `Started` 或现有长按开始节点中，先检查 `ConversionEnergyComponent.HasConversionEnergy()`。
 2. 为真时调用玩家控制器的 `BeginConversionEnergyCameraZoom()`。
 3. 当长按触发实际使用、输入完成或输入取消时，调用 `EndConversionEnergyCameraZoom()`。
 
-如果使用 C++ 的 `AGridPlayerController::UseEnergyAction` 绑定入口，建议在 `BP_GridPlayerController` 中覆写 `CanStartConversionEnergyCameraZoom()`，返回当前是否持有转换能量。相机缩放本身由 `UCombatCameraDirectorComponent` 处理，参数详见 [CombatCamera_SystemGuide.md](../03_CombatAndEnemies/CombatCamera_SystemGuide.md)。
+如果使用 C++ 的 `AGridPlayerController::UseEnergyAction` 绑定入口，`CanStartConversionEnergyCameraZoom()` 默认会从受控 `AGridPawn` 的 `ConversionEnergyComponent` 查询是否持有能量。相机缩放本身由 `UCombatCameraDirectorComponent` 处理，参数详见 [CombatCamera_SystemGuide.md](../03_CombatAndEnemies/CombatCamera_SystemGuide.md)。
+
+## 蓝图迁移步骤
+
+1. 在 `BP_GridPawn` 中找到自定义变量 `hasEnergy` / `bHasConversionEnergy` 和 `HeldConversionEnergyType` 的读写点。
+2. 删除或停止写入这些本地变量，改为读取 `ConversionEnergyComponent`。
+3. `OnPlayerKilledEnemy` 中不要再 Grant 本地能量；C++ 已在触发该事件前调用 `GrantConversionEnergy()`。
+4. `TryUseConversionEnergy` 中将“是否有能量”判断改为 `ConversionEnergyComponent.HasConversionEnergy()`。
+5. 需要使用当前能量类型时，调用 `ConversionEnergyComponent.GetHeldConversionEnergyType()`。
+6. `ConvertAreaAroundPlayer()` 返回 `true` 后，调用 `ConversionEnergyComponent.ConsumeConversionEnergy()`。
+7. HUD 可绑定 `OnConversionEnergyChanged`，或在现有刷新函数中读取组件状态。
 
 ## 调试检查点
 
@@ -240,21 +266,22 @@ bool ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType);
 检查顺序：
 
 1. 玩家是否真的击杀敌人，而不是未击杀退回。
-2. `BP_GridPawn` 是否实现了 `OnPlayerKilledEnemy`。
+2. 玩家 Pawn 上是否存在 `ConversionEnergyComponent`。
 3. `DroppedEnergyType` 是否为 `Construct` 或 `Acid`。
-4. `GrantConversionEnergy` 是否正确设置了 `bHasConversionEnergy` 和 `HeldConversionEnergyType`。
+4. `ConversionEnergyComponent.HasConversionEnergy()` 是否为 `true`。
+5. `OnConversionEnergyChanged` 或 `OnConversionEnergyGranted` 是否被 HUD / 表现蓝图正确监听。
 
 ### 使用能量后没有转换地块
 
 检查顺序：
 
 1. 输入事件是否正确触发 `TryUseConversionEnergy`。
-2. `bHasConversionEnergy` 是否为 `true`。
+2. `ConversionEnergyComponent.HasConversionEnergy()` 是否为 `true`。
 3. 当前目标地块类型是否为有效的 `ETileType`，通常应为 `Construct` 或 `Acid`。
 4. 传入 `ConvertAreaAroundPlayer` 的 `GridManager` 是否有效。
 5. 玩家周围 3x3 范围内是否存在 `bConvertible == true` 且非 `Obstacle` 的格子。
 6. `ConvertAreaAroundPlayer` 的返回值是否为 `true`。
-7. 是否只在返回 `true` 后调用了 `ConsumeConversionEnergy`。
+7. 是否只在返回 `true` 后调用了 `ConversionEnergyComponent.ConsumeConversionEnergy()`。
 
 ## 当前边界
 
@@ -263,8 +290,8 @@ bool ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType);
 - 玩家属性满值压制同阵营敌人。
 - 被压制敌人跳过默认主动行动。
 - 被压制时提供蓝图表现事件。
-- 玩家击杀敌人后向蓝图发送掉落能量类型。
-- 单槽能量推荐由 `BP_GridPawn` 持有，便于原型迭代。
+- 玩家击杀敌人后由 `UConversionEnergyComponent` 保存掉落能量，并向蓝图发送掉落能量类型。
+- 单槽能量由 `UConversionEnergyComponent` 权威持有。
 - 蓝图已实现能量目标类型切换和能量使用入口。
 - C++ 已实现以玩家为中心的 3x3 地块转换函数。
 
