@@ -34,6 +34,11 @@ Source/Chessboard_Roguelike/Private/Camera/CombatCameraDirectorComponent.cpp
 | `FocusCombatCameraOnGridTile()` | `AGridPlayerController` | 蓝图可调用入口，将目标世界位置转发给战斗相机组件 |
 | `FocusGridTileBriefly()` | `UCombatCameraDirectorComponent` | 蓝图可调用入口，让镜头短暂偏向指定世界位置 |
 | `StopFocus()` | `UCombatCameraDirectorComponent` | 立即恢复相机原始状态并停止聚焦 |
+| `BeginConversionEnergyCameraZoom()` | `AGridPlayerController` | 蓝图可调用入口，开始地块转换能量长按缩放 |
+| `EndConversionEnergyCameraZoom()` | `AGridPlayerController` | 蓝图可调用入口，结束地块转换能量长按缩放并快速回弹 |
+| `CanStartConversionEnergyCameraZoom()` | `AGridPlayerController` | 蓝图可覆写判断，建议返回当前是否持有转换能量 |
+| `BeginConversionEnergyZoom()` | `UCombatCameraDirectorComponent` | 相机组件内部入口，缓慢拉近 SpringArm |
+| `EndConversionEnergyZoom()` | `UCombatCameraDirectorComponent` | 相机组件内部入口，快速恢复 SpringArm 臂长 |
 
 ## 相机组件参数
 
@@ -48,6 +53,10 @@ Source/Chessboard_Roguelike/Private/Camera/CombatCameraDirectorComponent.cpp
 | `FocusOffsetScale` | `0.65` | 死亡地块平面偏移转换到 SpringArm `TargetOffset` 的比例 |
 | `ZoomInDistance` | `300` | 聚焦期间缩短的 SpringArm 臂长 |
 | `bDisableSpringArmLagDuringFocus` | `true` | 聚焦期间是否临时关闭 SpringArm 的 Camera Lag 和 Camera Rotation Lag |
+| `ConversionEnergyZoomInDuration` | `0.45` | 持有转换能量并长按输入时，镜头缓慢拉近所用时间 |
+| `ConversionEnergyZoomOutDuration` | `0.12` | 转换能量使用完成或取消时，镜头快速回弹所用时间 |
+| `ConversionEnergyZoomInDistance` | `240` | 长按转换能量时缩短的 SpringArm 臂长 |
+| `bDisableSpringArmLagDuringConversionEnergyZoom` | `true` | 转换能量缩放期间是否临时关闭 SpringArm 的 Camera Lag 和 Camera Rotation Lag |
 
 组件使用 `GetWorld()->GetRealTimeSeconds()` 推进时间，因此全局 Time Dilation 或 HitStop 不会阻止镜头回退。
 
@@ -76,6 +85,19 @@ RuntimeFocusOutDuration = FocusOutDuration
 
 如果 SpringArm 启用了 Camera Lag，默认会在战斗聚焦期间临时关闭，避免真实相机还在追赶目标时组件已经开始复位。聚焦完成后会恢复原来的 `bEnableCameraLag`、`bEnableCameraRotationLag`、`CameraLagSpeed` 和 `CameraRotationLagSpeed`。
 
+## 地块转换能量长按缩放
+
+地块转换能量的持有状态仍由蓝图维护。相机系统只提供表现接口：
+
+1. 长按空格或对应增强输入 `Started` 时，如果玩家持有能量，调用 `AGridPlayerController::BeginConversionEnergyCameraZoom()`。
+2. 组件用 `ConversionEnergyZoomInDuration` 将 SpringArm `TargetArmLength` 缓慢拉近到 `原始臂长 - ConversionEnergyZoomInDistance`。
+3. 能量实际使用成功、输入 `Triggered`、`Completed` 或 `Canceled` 时，调用 `AGridPlayerController::EndConversionEnergyCameraZoom()`。
+4. 组件用 `ConversionEnergyZoomOutDuration` 快速恢复到长按前的 SpringArm 臂长。
+
+如果在 C++ 中为 `UseEnergyAction` 赋值，`AGridPlayerController` 会自动绑定 `Started`、`Triggered`、`Completed` 和 `Canceled`。其中 `Started` 会先调用 `CanStartConversionEnergyCameraZoom()`；建议在 `BP_GridPlayerController` 中覆写该函数，并返回玩家当前的 `bHasConversionEnergy`。如果能量逻辑仍完全在 `BP_GridPawn` 的输入图中，也可以不赋值 `UseEnergyAction`，直接在已有蓝图输入链路中调用 Begin/End 两个函数。
+
+转换能量缩放与死亡地块聚焦共享同一个 SpringArm。死亡聚焦优先级更高，会打断正在进行的转换能量缩放；转换能量缩放开始时也会停止未完成的死亡聚焦，避免两个效果同时改写 `TargetArmLength`。
+
 ## 接入覆盖
 
 因为触发点统一在 `AGridEnemyPawn::Kill()`，以下死亡来源都会触发聚焦：
@@ -97,3 +119,5 @@ RuntimeFocusOutDuration = FocusOutDuration
 5. 如果远距离击杀仍然看不清，确认 `bDisableSpringArmLagDuringFocus` 是否为 `true`。
 6. 如果聚焦停留太短，调高 `ExtraFocusHoldDurationAtMaxDistance` 或 `FocusHoldDuration`。
 7. 如果聚焦幅度太小，调高 `FocusOffsetScale` 或 `MaxFocusOffset`；如果太晃，降低两者或缩短 `ZoomInDistance`。
+8. 如果长按空格没有拉近镜头，检查 `UseEnergyAction` 是否在 `BP_GridPlayerController` 中赋值，或现有蓝图输入链路是否调用了 `BeginConversionEnergyCameraZoom()`。
+9. 如果没有能量时也触发了缩放，覆写 `CanStartConversionEnergyCameraZoom()`，让它返回当前 `bHasConversionEnergy`。

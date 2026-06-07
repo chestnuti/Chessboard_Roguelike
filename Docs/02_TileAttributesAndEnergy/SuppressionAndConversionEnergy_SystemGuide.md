@@ -195,13 +195,25 @@ bool ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType);
 输入使用能量
 -> TryUseConversionEnergy
 -> 检查 bHasConversionEnergy
+-> BeginConversionEnergyCameraZoom（长按开始时，仅当持有能量）
 -> 读取当前目标 ETileType
 -> ConvertAreaAroundPlayer(GridManager, TargetTileType)
 -> 返回 true 时 ConsumeConversionEnergy
+-> EndConversionEnergyCameraZoom（使用成功、输入完成或取消时）
 -> 刷新 HUD / 播放反馈
 ```
 
 蓝图应只在 `ConvertAreaAroundPlayer` 返回 `true` 时消费能量。这样玩家在周围没有任何可转换格子时，不会白白损失能量。
+
+### 长按相机反馈
+
+玩家持有转换能量时，长按空格可以触发地块转换能量相机缩放：
+
+1. 在增强输入 `Started` 或现有长按开始节点中，先检查 `bHasConversionEnergy`。
+2. 为真时调用玩家控制器的 `BeginConversionEnergyCameraZoom()`。
+3. 当长按触发实际使用、输入完成或输入取消时，调用 `EndConversionEnergyCameraZoom()`。
+
+如果使用 C++ 的 `AGridPlayerController::UseEnergyAction` 绑定入口，建议在 `BP_GridPlayerController` 中覆写 `CanStartConversionEnergyCameraZoom()`，返回当前是否持有转换能量。相机缩放本身由 `UCombatCameraDirectorComponent` 处理，参数详见 [CombatCamera_SystemGuide.md](../03_CombatAndEnemies/CombatCamera_SystemGuide.md)。
 
 ## 调试检查点
 

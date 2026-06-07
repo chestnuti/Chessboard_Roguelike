@@ -26,6 +26,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat Camera")
 	void FocusCombatCameraOnGridTile(const FVector& TargetWorldLocation);
 
+	UFUNCTION(BlueprintCallable, Category = "Conversion Energy Camera")
+	void BeginConversionEnergyCameraZoom();
+
+	UFUNCTION(BlueprintCallable, Category = "Conversion Energy Camera")
+	void EndConversionEnergyCameraZoom();
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, BlueprintPure, Category = "Conversion Energy Camera")
+	bool CanStartConversionEnergyCameraZoom() const;
+
 protected:
 	// Mapping context and actions are assigned in Blueprint/Data assets so bindings stay data-driven.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
@@ -43,6 +52,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> MoveRightAction;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> UseEnergyAction;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
 	TSubclassOf<UPlayerAttributeHUDWidget> PlayerAttributeHUDClass;
 
@@ -56,4 +68,6 @@ private:
 	void MoveLeft();
 	void MoveRight();
 	void RequestPawnMove(FIntPoint Direction);
+	void HandleUseEnergyStarted();
+	void HandleUseEnergyFinished();
 };

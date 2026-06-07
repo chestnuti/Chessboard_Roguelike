@@ -21,7 +21,18 @@ void UCombatCameraDirectorComponent::TickComponent(float DeltaTime, ELevelTick T
 	UWorld* World = GetWorld();
 	if (!bFocusActive || !SpringArm || !World)
 	{
+		if (!bConversionEnergyZoomActive || !SpringArm || !World)
+		{
+			StopFocus();
+			EndConversionEnergyZoom();
+			return;
+		}
+	}
+
+	if (!SpringArm || !World)
+	{
 		StopFocus();
+		EndConversionEnergyZoom();
 		return;
 	}
 
@@ -31,20 +42,17 @@ void UCombatCameraDirectorComponent::TickComponent(float DeltaTime, ELevelTick T
 		: DeltaTime;
 	LastRealTimeSeconds = CurrentRealTimeSeconds;
 
-	ElapsedRealTime += FMath::Max(0.f, RealDeltaSeconds);
+	const float SafeRealDeltaSeconds = FMath::Max(0.f, RealDeltaSeconds);
 
-	const float TotalDuration = GetTotalDuration();
-	if (TotalDuration <= KINDA_SMALL_NUMBER)
+	if (bFocusActive)
 	{
-		StopFocus();
+		TickDeathFocus(SafeRealDeltaSeconds);
 		return;
 	}
 
-	ApplyFocusState(FMath::Clamp(ElapsedRealTime / TotalDuration, 0.f, 1.f));
-
-	if (ElapsedRealTime >= TotalDuration)
+	if (bConversionEnergyZoomActive)
 	{
-		StopFocus();
+		TickConversionEnergyZoom(SafeRealDeltaSeconds);
 	}
 }
 
@@ -59,6 +67,13 @@ void UCombatCameraDirectorComponent::FocusGridTileBriefly(const FVector& TargetW
 	}
 
 	ActiveSpringArm = SpringArm;
+	if (bConversionEnergyZoomActive)
+	{
+		SpringArm->TargetArmLength = ConversionEnergyRestArmLength;
+		RestoreSpringArmLag(SpringArm);
+		ResetConversionEnergyZoomState();
+	}
+
 	if (!bFocusActive)
 	{
 		RestTargetOffset = SpringArm->TargetOffset;
@@ -101,6 +116,70 @@ void UCombatCameraDirectorComponent::StopFocus()
 	bHasCachedSpringArmLagSettings = false;
 	ActiveSpringArm.Reset();
 	SetComponentTickEnabled(false);
+}
+
+void UCombatCameraDirectorComponent::BeginConversionEnergyZoom()
+{
+	USpringArmComponent* SpringArm = FindSpringArm();
+	UWorld* World = GetWorld();
+	if (!SpringArm || !World)
+	{
+		UE_LOG(LogCombatCameraDirector, Verbose, TEXT("BeginConversionEnergyZoom skipped: no SpringArmComponent found."));
+		return;
+	}
+
+	if (bFocusActive)
+	{
+		StopFocus();
+	}
+
+	ActiveSpringArm = SpringArm;
+	if (!bConversionEnergyZoomActive)
+	{
+		ConversionEnergyRestArmLength = SpringArm->TargetArmLength;
+	}
+
+	ConversionEnergyStartArmLength = SpringArm->TargetArmLength;
+	ConversionEnergyTargetArmLength = FMath::Max(0.f, ConversionEnergyRestArmLength - ConversionEnergyZoomInDistance);
+	ConversionEnergyElapsedRealTime = 0.f;
+	LastRealTimeSeconds = World->GetRealTimeSeconds();
+	bConversionEnergyZoomActive = true;
+	bConversionEnergyZoomReturning = false;
+
+	if (bDisableSpringArmLagDuringConversionEnergyZoom)
+	{
+		CacheAndDisableSpringArmLag(SpringArm);
+	}
+
+	SetComponentTickEnabled(true);
+}
+
+void UCombatCameraDirectorComponent::EndConversionEnergyZoom()
+{
+	if (!bConversionEnergyZoomActive)
+	{
+		return;
+	}
+
+	if (bConversionEnergyZoomReturning)
+	{
+		return;
+	}
+
+	USpringArmComponent* SpringArm = ActiveSpringArm.Get();
+	UWorld* World = GetWorld();
+	if (!SpringArm || !World)
+	{
+		ResetConversionEnergyZoomState();
+		return;
+	}
+
+	ConversionEnergyStartArmLength = SpringArm->TargetArmLength;
+	ConversionEnergyElapsedRealTime = 0.f;
+	LastRealTimeSeconds = World->GetRealTimeSeconds();
+	bConversionEnergyZoomReturning = true;
+
+	SetComponentTickEnabled(true);
 }
 
 USpringArmComponent* UCombatCameraDirectorComponent::FindSpringArm()
@@ -206,6 +285,62 @@ void UCombatCameraDirectorComponent::ApplyFocusState(float Alpha)
 	SpringArm->TargetArmLength = NewArmLength;
 }
 
+void UCombatCameraDirectorComponent::TickDeathFocus(float RealDeltaSeconds)
+{
+	ElapsedRealTime += RealDeltaSeconds;
+
+	const float TotalDuration = GetTotalDuration();
+	if (TotalDuration <= KINDA_SMALL_NUMBER)
+	{
+		StopFocus();
+		return;
+	}
+
+	ApplyFocusState(FMath::Clamp(ElapsedRealTime / TotalDuration, 0.f, 1.f));
+
+	if (ElapsedRealTime >= TotalDuration)
+	{
+		StopFocus();
+	}
+}
+
+void UCombatCameraDirectorComponent::TickConversionEnergyZoom(float RealDeltaSeconds)
+{
+	USpringArmComponent* SpringArm = ActiveSpringArm.Get();
+	if (!SpringArm)
+	{
+		ResetConversionEnergyZoomState();
+		return;
+	}
+
+	const float Duration = bConversionEnergyZoomReturning
+		? ConversionEnergyZoomOutDuration
+		: ConversionEnergyZoomInDuration;
+	ConversionEnergyElapsedRealTime += RealDeltaSeconds;
+
+	const float Alpha = Duration <= KINDA_SMALL_NUMBER
+		? 1.f
+		: FMath::Clamp(ConversionEnergyElapsedRealTime / Duration, 0.f, 1.f);
+	const float SmoothAlpha = Alpha * Alpha * (3.f - 2.f * Alpha);
+	const float TargetArmLength = bConversionEnergyZoomReturning
+		? ConversionEnergyRestArmLength
+		: ConversionEnergyTargetArmLength;
+
+	SpringArm->TargetArmLength = FMath::Lerp(ConversionEnergyStartArmLength, TargetArmLength, SmoothAlpha);
+
+	if (Alpha < 1.f)
+	{
+		return;
+	}
+
+	SpringArm->TargetArmLength = TargetArmLength;
+	if (bConversionEnergyZoomReturning)
+	{
+		RestoreSpringArmLag(SpringArm);
+		ResetConversionEnergyZoomState();
+	}
+}
+
 void UCombatCameraDirectorComponent::CacheAndDisableSpringArmLag(USpringArmComponent* SpringArm)
 {
 	if (!SpringArm || !bDisableSpringArmLagDuringFocus)
@@ -237,4 +372,21 @@ void UCombatCameraDirectorComponent::RestoreSpringArmLag(USpringArmComponent* Sp
 	SpringArm->bEnableCameraRotationLag = bRestCameraRotationLagEnabled;
 	SpringArm->CameraLagSpeed = RestCameraLagSpeed;
 	SpringArm->CameraRotationLagSpeed = RestCameraRotationLagSpeed;
+}
+
+void UCombatCameraDirectorComponent::ResetConversionEnergyZoomState()
+{
+	ConversionEnergyRestArmLength = 0.f;
+	ConversionEnergyStartArmLength = 0.f;
+	ConversionEnergyTargetArmLength = 0.f;
+	ConversionEnergyElapsedRealTime = 0.f;
+	bConversionEnergyZoomActive = false;
+	bConversionEnergyZoomReturning = false;
+
+	if (!bFocusActive)
+	{
+		bHasCachedSpringArmLagSettings = false;
+		ActiveSpringArm.Reset();
+		SetComponentTickEnabled(false);
+	}
 }

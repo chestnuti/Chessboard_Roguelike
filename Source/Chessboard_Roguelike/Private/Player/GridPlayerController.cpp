@@ -35,6 +35,27 @@ void AGridPlayerController::FocusCombatCameraOnGridTile(const FVector& TargetWor
 	}
 }
 
+void AGridPlayerController::BeginConversionEnergyCameraZoom()
+{
+	if (IsLocalController() && CombatCameraDirectorComponent)
+	{
+		CombatCameraDirectorComponent->BeginConversionEnergyZoom();
+	}
+}
+
+void AGridPlayerController::EndConversionEnergyCameraZoom()
+{
+	if (IsLocalController() && CombatCameraDirectorComponent)
+	{
+		CombatCameraDirectorComponent->EndConversionEnergyZoom();
+	}
+}
+
+bool AGridPlayerController::CanStartConversionEnergyCameraZoom_Implementation() const
+{
+	return true;
+}
+
 void AGridPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -97,6 +118,13 @@ void AGridPlayerController::SetupInputComponent()
 	{
 		EnhancedInputComponent->BindAction(MoveRightAction, ETriggerEvent::Started, this, &AGridPlayerController::MoveRight);
 	}
+	if (UseEnergyAction)
+	{
+		EnhancedInputComponent->BindAction(UseEnergyAction, ETriggerEvent::Started, this, &AGridPlayerController::HandleUseEnergyStarted);
+		EnhancedInputComponent->BindAction(UseEnergyAction, ETriggerEvent::Triggered, this, &AGridPlayerController::HandleUseEnergyFinished);
+		EnhancedInputComponent->BindAction(UseEnergyAction, ETriggerEvent::Completed, this, &AGridPlayerController::HandleUseEnergyFinished);
+		EnhancedInputComponent->BindAction(UseEnergyAction, ETriggerEvent::Canceled, this, &AGridPlayerController::HandleUseEnergyFinished);
+	}
 }
 
 void AGridPlayerController::MoveUp()
@@ -130,4 +158,17 @@ void AGridPlayerController::RequestPawnMove(FIntPoint Direction)
 
 	// Controller translates input into grid directions; the pawn/GridManager validate the move.
 	GridPawn->TryMove(Direction);
+}
+
+void AGridPlayerController::HandleUseEnergyStarted()
+{
+	if (CanStartConversionEnergyCameraZoom())
+	{
+		BeginConversionEnergyCameraZoom();
+	}
+}
+
+void AGridPlayerController::HandleUseEnergyFinished()
+{
+	EndConversionEnergyCameraZoom();
 }
