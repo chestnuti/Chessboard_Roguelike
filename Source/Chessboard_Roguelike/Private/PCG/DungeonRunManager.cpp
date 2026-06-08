@@ -9,6 +9,8 @@
 #include "Grid/GridManager.h"
 #include "PCG/DungeonGenerationSettings.h"
 #include "PCG/LSystemDungeonGenerator.h"
+#include "Pickup/GridPickupActor.h"
+#include "Pickup/GridPickupManager.h"
 #include "Player/GridPawn.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDungeonRunManager, Log, All);
@@ -68,6 +70,11 @@ bool ADungeonRunManager::GenerateAndInitializeRun()
 		SpawnEnemiesFromLayout();
 	}
 
+	if (bSpawnPickups)
+	{
+		SpawnPickupsFromLayout();
+	}
+
 	if (EnemyManager && GridManager && TurnManager && PlayerPawn)
 	{
 		// Rebuild after optional spawning so placed enemies and PCG-spawned enemies share the same manager list.
@@ -80,8 +87,11 @@ bool ADungeonRunManager::GenerateAndInitializeRun()
 		TurnManager->SetTurnState(ETurnState::PlayerInput);
 	}
 
-	UE_LOG(LogDungeonRunManager, Log, TEXT("Dungeon run initialized: seed=%d rooms=%d enemyCandidates=%d."),
-		LastGeneratedLayout.Seed, LastGeneratedLayout.Rooms.Num(), LastGeneratedLayout.EnemySpawnCandidates.Num());
+	UE_LOG(LogDungeonRunManager, Log, TEXT("Dungeon run initialized: seed=%d rooms=%d enemyCandidates=%d rewardCandidates=%d."),
+		LastGeneratedLayout.Seed,
+		LastGeneratedLayout.Rooms.Num(),
+		LastGeneratedLayout.EnemySpawnCandidates.Num(),
+		LastGeneratedLayout.RewardSpawnCandidates.Num());
 	return true;
 }
 
@@ -125,6 +135,15 @@ void ADungeonRunManager::ResolveRuntimeReferences()
 		for (TActorIterator<AGridEnemyManager> It(World); It; ++It)
 		{
 			EnemyManager = *It;
+			break;
+		}
+	}
+
+	if (!PickupManager)
+	{
+		for (TActorIterator<AGridPickupManager> It(World); It; ++It)
+		{
+			PickupManager = *It;
 			break;
 		}
 	}
@@ -218,6 +237,81 @@ void ADungeonRunManager::SpawnEnemiesFromLayout()
 	}
 }
 
+void ADungeonRunManager::SpawnPickupsFromLayout()
+{
+	if (!DungeonGenerationSettings || !GridManager || !GetWorld())
+	{
+		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnPickupsFromLayout skipped: DungeonGenerationSettings, GridManager, or World is missing."));
+		return;
+	}
+
+	AGridPickupManager* ResolvedPickupManager = EnsurePickupManager();
+	if (!ResolvedPickupManager)
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnPickupsFromLayout skipped: PickupManager is missing and could not be spawned."));
+		return;
+	}
+
+	ResolvedPickupManager->ClearAllPickups();
+
+	if (DungeonGenerationSettings->PickupSpawnPool.IsEmpty())
+	{
+		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnPickupsFromLayout skipped: PickupSpawnPool is empty."));
+		return;
+	}
+
+	FRandomStream SpawnStream(LastGeneratedLayout.Seed + 15485863);
+	const int32 TargetSpawnCount = FMath::Min(DungeonGenerationSettings->PickupSpawnCount, LastGeneratedLayout.RewardSpawnCandidates.Num());
+	int32 SpawnedCount = 0;
+
+	for (int32 Index = 0; Index < LastGeneratedLayout.RewardSpawnCandidates.Num() && SpawnedCount < TargetSpawnCount; ++Index)
+	{
+		const FDungeonSpawnCandidate& Candidate = LastGeneratedLayout.RewardSpawnCandidates[Index];
+		if (!GridManager->IsWalkable(Candidate.Coord) || GridManager->IsOccupied(Candidate.Coord))
+		{
+			continue;
+		}
+
+		if (ResolvedPickupManager->GetPickupAt(Candidate.Coord))
+		{
+			continue;
+		}
+
+		const FDungeonPickupSpawnEntry* SelectedSpawnEntry = SelectPickupSpawnEntryForCandidate(Candidate, SpawnStream);
+		if (!SelectedSpawnEntry)
+		{
+			UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnPickupsFromLayout skipped candidate (%d,%d): no valid pickup class for depth %d."),
+				Candidate.Coord.X, Candidate.Coord.Y, Candidate.Depth);
+			continue;
+		}
+
+		const FTransform SpawnTransform(FRotator::ZeroRotator, GridManager->GridToWorld(Candidate.Coord));
+		AGridPickupActor* Pickup = GetWorld()->SpawnActorDeferred<AGridPickupActor>(
+			SelectedSpawnEntry->PickupClass,
+			SpawnTransform,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!Pickup)
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnPickupsFromLayout failed at (%d,%d)."),
+				Candidate.Coord.X, Candidate.Coord.Y);
+			continue;
+		}
+
+		Pickup->FinishSpawning(SpawnTransform);
+		Pickup->InitializeOnGrid(GridManager, Candidate.Coord);
+		if (ResolvedPickupManager->RegisterPickup(Pickup))
+		{
+			++SpawnedCount;
+		}
+		else
+		{
+			Pickup->Destroy();
+		}
+	}
+}
+
 const FDungeonEnemySpawnEntry* ADungeonRunManager::SelectEnemySpawnEntryForCandidate(
 	const FDungeonSpawnCandidate& Candidate,
 	FRandomStream& Stream) const
@@ -273,6 +367,59 @@ const FDungeonEnemySpawnEntry* ADungeonRunManager::SelectEnemySpawnEntryForCandi
 	return nullptr;
 }
 
+const FDungeonPickupSpawnEntry* ADungeonRunManager::SelectPickupSpawnEntryForCandidate(
+	const FDungeonSpawnCandidate& Candidate,
+	FRandomStream& Stream) const
+{
+	if (!DungeonGenerationSettings)
+	{
+		return nullptr;
+	}
+
+	int32 TotalWeight = 0;
+	for (const FDungeonPickupSpawnEntry& Entry : DungeonGenerationSettings->PickupSpawnPool)
+	{
+		if (!Entry.PickupClass || Entry.Weight <= 0)
+		{
+			continue;
+		}
+
+		if (Candidate.Depth < Entry.MinDepth || Candidate.Depth > Entry.MaxDepth)
+		{
+			continue;
+		}
+
+		TotalWeight += Entry.Weight;
+	}
+
+	if (TotalWeight <= 0)
+	{
+		return nullptr;
+	}
+
+	int32 Roll = Stream.RandRange(1, TotalWeight);
+	for (const FDungeonPickupSpawnEntry& Entry : DungeonGenerationSettings->PickupSpawnPool)
+	{
+		if (!Entry.PickupClass || Entry.Weight <= 0)
+		{
+			continue;
+		}
+
+		if (Candidate.Depth < Entry.MinDepth || Candidate.Depth > Entry.MaxDepth)
+		{
+			continue;
+		}
+
+		Roll -= Entry.Weight;
+		if (Roll <= 0)
+		{
+			return &Entry;
+		}
+	}
+
+	return nullptr;
+}
+
 int32 ADungeonRunManager::CalculateEnemyKillThresholdForCandidate(
 	const AGridEnemyPawn* Enemy,
 	const FDungeonSpawnCandidate& Candidate,
@@ -291,4 +438,27 @@ void ADungeonRunManager::RegisterEnemyWithManager(AGridEnemyPawn* Enemy) const
 	{
 		EnemyManager->RegisterEnemy(Enemy);
 	}
+}
+
+AGridPickupManager* ADungeonRunManager::EnsurePickupManager()
+{
+	if (PickupManager)
+	{
+		return PickupManager;
+	}
+
+	ResolveRuntimeReferences();
+	if (PickupManager)
+	{
+		return PickupManager;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	PickupManager = World->SpawnActor<AGridPickupManager>(AGridPickupManager::StaticClass());
+	return PickupManager;
 }

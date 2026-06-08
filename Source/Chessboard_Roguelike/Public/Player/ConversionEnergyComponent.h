@@ -38,7 +38,13 @@ public:
 	ETileType GetHeldConversionEnergyType() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Conversion Energy")
-	void GrantConversionEnergy(ETileType NewEnergyType);
+	void GrantConversionEnergy(ETileType IgnoredEnergyType = ETileType::Minimal);
+
+	UFUNCTION(BlueprintCallable, Category = "Conversion Energy")
+	bool SetHeldConversionEnergyType(ETileType NewEnergyType);
+
+	UFUNCTION(BlueprintCallable, Category = "Conversion Energy")
+	bool CycleHeldConversionEnergyType();
 
 	UFUNCTION(BlueprintCallable, Category = "Conversion Energy")
 	bool ConsumeConversionEnergy();
@@ -60,7 +66,8 @@ private:
 	bool bHasConversionEnergy = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Conversion Energy", meta = (AllowPrivateAccess = "true"))
-	ETileType HeldConversionEnergyType = ETileType::Minimal;
+	ETileType HeldConversionEnergyType = ETileType::Construct;
 
-	bool IsGrantableEnergyType(ETileType EnergyType) const;
+	bool IsSelectableEnergyType(ETileType EnergyType) const;
+	ETileType GetNextSelectableEnergyType(ETileType EnergyType) const;
 };

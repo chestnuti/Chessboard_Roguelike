@@ -71,6 +71,7 @@ void AGridPlayerController::BeginPlay()
 			if (APawn* ControlledPawn = GetPawn())
 			{
 				PlayerAttributeHUD->InitializeFromAttributeComponent(ControlledPawn->FindComponentByClass<UPlayerAttributeComponent>());
+				PlayerAttributeHUD->InitializeFromConversionEnergyComponent(ControlledPawn->FindComponentByClass<UConversionEnergyComponent>());
 			}
 			PlayerAttributeHUD->AddToViewport();
 		}
@@ -127,6 +128,10 @@ void AGridPlayerController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(UseEnergyAction, ETriggerEvent::Completed, this, &AGridPlayerController::HandleUseEnergyFinished);
 		EnhancedInputComponent->BindAction(UseEnergyAction, ETriggerEvent::Canceled, this, &AGridPlayerController::HandleUseEnergyFinished);
 	}
+	if (SwitchEnergyTypeAction)
+	{
+		EnhancedInputComponent->BindAction(SwitchEnergyTypeAction, ETriggerEvent::Started, this, &AGridPlayerController::HandleSwitchEnergyType);
+	}
 }
 
 void AGridPlayerController::MoveUp()
@@ -173,4 +178,13 @@ void AGridPlayerController::HandleUseEnergyStarted()
 void AGridPlayerController::HandleUseEnergyFinished()
 {
 	EndConversionEnergyCameraZoom();
+}
+
+void AGridPlayerController::HandleSwitchEnergyType()
+{
+	AGridPawn* GridPawn = Cast<AGridPawn>(GetPawn());
+	if (GridPawn && GridPawn->ConversionEnergyComponent)
+	{
+		GridPawn->ConversionEnergyComponent->CycleHeldConversionEnergyType();
+	}
 }

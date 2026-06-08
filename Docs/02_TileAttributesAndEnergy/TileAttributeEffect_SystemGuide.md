@@ -372,6 +372,7 @@ Mark Render State Dirty = true
 | `AcidText` | `TextBlock` | 显示 `Acid: 当前值 / 最大值` |
 | `ConstructProgressBar` | `ProgressBar` | 显示构成值比例 |
 | `AcidProgressBar` | `ProgressBar` | 显示酸性值比例 |
+| `EnergyText` | `TextBlock` | 显示当前地块转换能量状态，例如 `Energy: None`、`Energy: Construct` 或 `Energy: Acid` |
 
 ### 蓝图可调用函数
 
@@ -379,15 +380,19 @@ Mark Render State Dirty = true
 | --- | --- | --- |
 | `InitializeFromAttributeComponent` | `InAttributeComponent` | 绑定属性组件并刷新 |
 | `RefreshAttributeDisplay` | 无 | 手动刷新 HUD |
+| `InitializeFromConversionEnergyComponent` | `InEnergyComponent` | 绑定地块转换能量组件并刷新 |
+| `RefreshConversionEnergyDisplay` | 无 | 手动刷新能量显示 |
+| `GetConversionEnergyStatusText` | 无 | 返回当前能量状态文本，可供蓝图 Text 绑定读取 |
 
 HUD 行为：
 
-- `NativeConstruct()` 时尝试从 `GetOwningPlayerPawn()` 获取 `UPlayerAttributeComponent`。
+- `NativeConstruct()` 时尝试从 `GetOwningPlayerPawn()` 获取 `UPlayerAttributeComponent` 和 `UConversionEnergyComponent`。
 - 监听 `OnPlayerAttributeChanged`。
 - 监听 `OnPlayerHealthChanged`。
+- 监听 `OnConversionEnergyChanged`，能量获得、消耗或清空时刷新 `EnergyText`。
 - 属性变化时刷新文本和进度条。
 - 不使用 Tick。
-- 不写入玩家属性。
+- 不写入玩家属性或能量状态。
 
 ## 常见调试点
 

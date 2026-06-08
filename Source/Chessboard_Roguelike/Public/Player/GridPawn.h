@@ -9,6 +9,7 @@ class AGridManager;
 class ATurnManager;
 class AGridEnemyPawn;
 class AGridEnemyManager;
+class AGridPickupManager;
 class UCombatResolverComponent;
 class UConversionEnergyComponent;
 class UStaticMeshComponent;
@@ -73,6 +74,9 @@ public:
 	UPROPERTY()
 	TObjectPtr<AGridEnemyManager> EnemyManager;
 
+	UPROPERTY()
+	TObjectPtr<AGridPickupManager> PickupManager;
+
 	UFUNCTION(BlueprintCallable, Category = "Grid")
 	void InitializeOnGrid(AGridManager* InGridManager, ATurnManager* InTurnManager, FIntPoint InStartCoord);
 
@@ -106,5 +110,7 @@ private:
 	void ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor);
 	void StartFailedAttackVisualMove(const FVector& From, const FVector& BlockedTarget);
 	void FindEnemyManagerIfNeeded();
+	void FindPickupManagerIfNeeded();
+	void ResolvePickupAtCurrentTile();
 	void ResolvePostPlayerActionTurn();
 };

@@ -5,6 +5,7 @@
 #include "EngineUtils.h"
 #include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
+#include "Player/ConversionEnergyComponent.h"
 #include "Player/GridPlayerController.h"
 #include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
@@ -210,6 +211,11 @@ TArray<AGridEnemyPawn*> AGridEnemyManager::GetAliveEnemies() const
 void AGridEnemyManager::HandleEnemyKilled(AGridEnemyPawn* Enemy, FIntPoint DeathCoord, FVector DeathWorldLocation)
 {
 	AutoInitializeReferences();
+
+	if (PlayerPawn && PlayerPawn->ConversionEnergyComponent)
+	{
+		PlayerPawn->ConversionEnergyComponent->GrantConversionEnergy();
+	}
 
 	AGridPlayerController* GridPlayerController = PlayerPawn
 		? Cast<AGridPlayerController>(PlayerPawn->GetController())

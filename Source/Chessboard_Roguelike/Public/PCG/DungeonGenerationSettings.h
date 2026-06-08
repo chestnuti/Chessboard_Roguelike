@@ -5,6 +5,7 @@
 #include "DungeonGenerationSettings.generated.h"
 
 class AGridEnemyPawn;
+class AGridPickupActor;
 
 USTRUCT(BlueprintType)
 struct CHESSBOARD_ROGUELIKE_API FDungeonEnemySpawnEntry
@@ -33,6 +34,27 @@ struct CHESSBOARD_ROGUELIKE_API FDungeonEnemySpawnEntry
 	// Added to the resolved base threshold for every room-depth step of the spawn candidate.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns", meta = (ClampMin = "0"))
 	int32 KillThresholdBonusPerDepth = 0;
+};
+
+USTRUCT(BlueprintType)
+struct CHESSBOARD_ROGUELIKE_API FDungeonPickupSpawnEntry
+{
+	GENERATED_BODY()
+
+	// Pickup class selected when this entry passes depth filtering and weighted selection.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns")
+	TSubclassOf<AGridPickupActor> PickupClass;
+
+	// Relative selection chance among all entries valid for a candidate depth.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns", meta = (ClampMin = "1"))
+	int32 Weight = 1;
+
+	// Inclusive depth range for this pickup type.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns", meta = (ClampMin = "0"))
+	int32 MinDepth = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Spawns", meta = (ClampMin = "0"))
+	int32 MaxDepth = 999;
 };
 
 UCLASS(BlueprintType)
@@ -108,4 +130,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Spawns", meta = (ClampMin = "0"))
 	int32 RewardCandidateCount = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Spawns", meta = (ClampMin = "0"))
+	int32 PickupSpawnCount = 3;
+
+	// Runtime spawning consumes reward candidates and selects concrete pickup classes from this pool.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Spawns")
+	TArray<FDungeonPickupSpawnEntry> PickupSpawnPool;
 };

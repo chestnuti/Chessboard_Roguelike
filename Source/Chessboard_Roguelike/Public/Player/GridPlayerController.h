@@ -55,6 +55,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	TObjectPtr<UInputAction> UseEnergyAction;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	TObjectPtr<UInputAction> SwitchEnergyTypeAction;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
 	TSubclassOf<UPlayerAttributeHUDWidget> PlayerAttributeHUDClass;
 
@@ -70,4 +73,5 @@ private:
 	void RequestPawnMove(FIntPoint Direction);
 	void HandleUseEnergyStarted();
 	void HandleUseEnergyFinished();
+	void HandleSwitchEnergyType();
 };

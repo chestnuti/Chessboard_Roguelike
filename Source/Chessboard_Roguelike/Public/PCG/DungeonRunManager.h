@@ -9,9 +9,12 @@ class AGridEnemyManager;
 class AGridEnemyPawn;
 class AGridManager;
 class AGridPawn;
+class AGridPickupManager;
+class AGridPickupActor;
 class ATurnManager;
 class UDungeonGenerationSettings;
 struct FDungeonEnemySpawnEntry;
+struct FDungeonPickupSpawnEntry;
 
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API ADungeonRunManager : public AActor
@@ -41,6 +44,9 @@ public:
 	bool bSpawnEnemies = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
+	bool bSpawnPickups = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
 	TObjectPtr<AGridManager> GridManager;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
@@ -51,6 +57,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
 	TObjectPtr<AGridEnemyManager> EnemyManager;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
+	TObjectPtr<AGridPickupManager> PickupManager;
 
 	UPROPERTY(BlueprintReadOnly, Category = "PCG|Dungeon")
 	FGeneratedDungeonLayout LastGeneratedLayout;
@@ -66,10 +75,13 @@ private:
 	bool ApplyGeneratedLayout();
 	bool InitializePlayerFromLayout();
 	void SpawnEnemiesFromLayout();
+	void SpawnPickupsFromLayout();
 	const FDungeonEnemySpawnEntry* SelectEnemySpawnEntryForCandidate(const FDungeonSpawnCandidate& Candidate, FRandomStream& Stream) const;
+	const FDungeonPickupSpawnEntry* SelectPickupSpawnEntryForCandidate(const FDungeonSpawnCandidate& Candidate, FRandomStream& Stream) const;
 	int32 CalculateEnemyKillThresholdForCandidate(
 		const AGridEnemyPawn* Enemy,
 		const FDungeonSpawnCandidate& Candidate,
 		const FDungeonEnemySpawnEntry& SpawnEntry) const;
 	void RegisterEnemyWithManager(AGridEnemyPawn* Enemy) const;
+	AGridPickupManager* EnsurePickupManager();
 };

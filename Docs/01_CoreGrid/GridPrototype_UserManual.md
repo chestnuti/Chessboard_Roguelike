@@ -15,6 +15,8 @@
 - `Content/Blueprints/Player/BP_GridPlayerController.uasset`
 - `Content/Blueprints/Core/BP_TurnManager.uasset`
 - `Content/Blueprints/Core/BP_GameMode_GridPrototype.uasset`
+- `Content/Blueprints/Pickups/BP_HealthPickup.uasset`
+- `Content/Blueprints/Pickups/BP_GridPickupManager.uasset`
 
 主要 C++ PCG 类型：
 
@@ -35,6 +37,7 @@
 专题说明：
 
 - [TileAttributeEffect_SystemGuide.md](../02_TileAttributesAndEnergy/TileAttributeEffect_SystemGuide.md): 地块属性变化、双属性值、HUD、地块材质刷新和蓝图接口说明。
+- [Pickup_SystemGuide.md](../02_TileAttributesAndEnergy/Pickup_SystemGuide.md): 可拾取道具、回血道具、PickupManager、PCG 奖励候选生成和扩展方式说明。
 - [CombatAndEnemy_SystemGuide.md](../03_CombatAndEnemies/CombatAndEnemy_SystemGuide.md): 近战攻击、敌人属性、免疫规则、单次阈值击杀和退回规则说明。
 
 ## 运行流程
@@ -55,14 +58,16 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 
 1. 关卡中放置 `BP_GridManager`、`BP_TurnManager`、玩家 Pawn，以及一个 `ADungeonRunManager` 派生蓝图或原生 Actor。
 2. 在 `DungeonRunManager` 上指定 `DungeonGenerationSettings`。
-3. 保持 `bAutoFindReferences = true`，或手动指定 `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`。
+3. 保持 `bAutoFindReferences = true`，或手动指定 `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`、`PickupManager`。
 4. 如果希望自动生成敌人，设置 `bSpawnEnemies = true`，并在 `DungeonGenerationSettings.EnemySpawnPool` 中配置敌人类型池。
-5. BeginPlay 时 `DungeonRunManager` 调用 `GenerateAndInitializeRun()`。
-6. `ULSystemDungeonGenerator` 生成 `FGeneratedDungeonLayout`。
-7. `GridManager->ApplyTileLayout(Layout.Tiles, Layout.Width, Layout.Height)` 应用生成结果。
-8. 玩家被初始化到 `Layout.StartCoord`。
-9. 可选敌人根据 `Layout.EnemySpawnCandidates` 生成并注册到 `EnemyManager`。
-10. `TurnManager` 切换到 `PlayerInput`。
+5. 如果希望自动生成拾取物，设置 `bSpawnPickups = true`，并在 `DungeonGenerationSettings.PickupSpawnPool` 中配置道具类型池。
+6. BeginPlay 时 `DungeonRunManager` 调用 `GenerateAndInitializeRun()`。
+7. `ULSystemDungeonGenerator` 生成 `FGeneratedDungeonLayout`。
+8. `GridManager->ApplyTileLayout(Layout.Tiles, Layout.Width, Layout.Height)` 应用生成结果。
+9. 玩家被初始化到 `Layout.StartCoord`。
+10. 可选敌人根据 `Layout.EnemySpawnCandidates` 生成并注册到 `EnemyManager`。
+11. 可选拾取物根据 `Layout.RewardSpawnCandidates` 生成并注册到 `PickupManager`。
+12. `TurnManager` 切换到 `PlayerInput`。
 
 注意：
 
@@ -70,6 +75,8 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `ADungeonRunManager` 会在运行开始前关闭玩家的自动网格初始化，避免玩家先占用手工起点。
 - 敌人使用 deferred spawn，并在生成前关闭 `bAutoInitializeOnBeginPlay`，避免敌人先占用默认 `StartGridCoord`。
 - 敌人类型不在 `DungeonRunManager` 上单独配置，而是从 `UDungeonGenerationSettings.EnemySpawnPool` 中按权重和深度筛选；池条目还可以按候选点深度调整敌人的 `KillThreshold`。
+- 拾取物不写入 `GridManager.Tiles` 的 `OccupantType`，由 `AGridPickupManager` 单独按坐标维护，因此不会阻挡玩家进入该格。
+- 拾取物类型不在 `DungeonRunManager` 上单独配置，而是从 `UDungeonGenerationSettings.PickupSpawnPool` 中按权重和深度筛选。
 - 当前 PCG 不依赖 UE PCG 插件；UE PCG Graph 后续更适合用于墙体、装饰和场景资产散布。
 
 ## GridSettings 配置
@@ -206,6 +213,8 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `EnemySpawnPool`: 敌人类型池。每项包含 `EnemyClass`、`Weight`、`MinDepth`、`MaxDepth`、`KillThresholdOverride` 和 `KillThresholdBonusPerDepth`，运行时会按候选点深度筛选并按权重随机选择。
 - `EventCandidateCount`: 事件候选生成数量。
 - `RewardCandidateCount`: 奖励候选生成数量。
+- `PickupSpawnCount`: 运行时最多生成的拾取物数量。
+- `PickupSpawnPool`: 拾取物类型池。每项包含 `PickupClass`、`Weight`、`MinDepth` 和 `MaxDepth`，运行时会按奖励候选点深度筛选并按权重随机选择。
 
 敌人池条目的 HP 阈值规则：
 
@@ -214,6 +223,13 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `KillThresholdBonusPerDepth` 会按候选点 `Depth` 叠加到基础阈值上。
 - 最终公式为 `FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdBonusPerDepth)`。
 - 该数值在 `ADungeonRunManager::SpawnEnemiesFromLayout()` 中，敌人 deferred spawn 完成后、`InitializeOnGrid()` 前写入敌人实例。
+
+拾取物池条目的深度规则：
+
+- `PickupClass` 必须指向 `AGridPickupActor` 或其子类，例如 `BP_HealthPickup`。
+- `Weight` 用于同一候选深度下的相对随机权重。
+- `MinDepth` / `MaxDepth` 用于限制该道具出现的房间深度范围。
+- `ADungeonRunManager::SpawnPickupsFromLayout()` 会从 `RewardSpawnCandidates` 中选择可通行、未被占据、未已有道具的格子生成拾取物。
 
 房间深度一致性规则：
 
@@ -317,6 +333,7 @@ L-System 符号：
 - 调用 `GridManager->RequestMove()`。
 - 更新 `CurrentGridCoord`。
 - 调用 `TileEffectResolverComponent->ResolveTileEnterEffect()`。
+- 调用 `ResolvePickupAtCurrentTile()`，让 `AGridPickupManager` 结算当前格拾取物。
 - 调用 `TurnManager->AddStep()`。
 - 开始视觉插值。
 - 插值结束后调用 `TurnManager->EndPlayerAction()`。
@@ -341,13 +358,16 @@ L-System 符号：
 - `MoveDownAction`
 - `MoveLeftAction`
 - `MoveRightAction`
+- `UseEnergyAction`
+- `SwitchEnergyTypeAction`
 - `PlayerAttributeHUDClass`
 
 Enhanced Input 行为：
 
 - BeginPlay 添加 `GridMovementMappingContext`。
-- `SetupInputComponent()` 绑定四个 InputAction。
-- 使用 `ETriggerEvent::Started`，每次按下触发一次。
+- `SetupInputComponent()` 绑定移动、能量使用和能量类型切换 InputAction。
+- 移动和能量类型切换使用 `ETriggerEvent::Started`，每次按下触发一次。
+- `UseEnergyAction` 使用 `Started` 开始相机拉近，并在 `Triggered` / `Completed` / `Canceled` 时结束相机拉近。
 
 当前 C++ 方向映射：
 
@@ -512,11 +532,15 @@ void AGridPlayerController::MoveRight()
 - `AcidText`
 - `ConstructProgressBar`
 - `AcidProgressBar`
+- `EnergyText`
 
 可调用函数：
 
 - `InitializeFromAttributeComponent(InAttributeComponent)`: 绑定属性组件。
 - `RefreshAttributeDisplay()`: 手动刷新显示。
+- `InitializeFromConversionEnergyComponent(InEnergyComponent)`: 绑定地块转换能量组件。
+- `RefreshConversionEnergyDisplay()`: 手动刷新能量显示。
+- `GetConversionEnergyStatusText()`: 返回当前能量状态文本，可用于蓝图 Text 绑定。
 
 行为：
 
@@ -525,6 +549,7 @@ void AGridPlayerController::MoveRight()
 - HUD 只读属性组件，不写 gameplay 数据。
 - HUD 监听 `OnPlayerAttributeChanged`，不使用 Tick 轮询。
 - HUD 监听 `OnPlayerHealthChanged` 刷新 HP 文本和进度条。
+- HUD 监听 `OnConversionEnergyChanged` 刷新 `EnergyText`，显示 `Energy: None`、`Energy: Construct` 或 `Energy: Acid`。
 
 ## 常见修改方式
 

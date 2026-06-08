@@ -6,7 +6,24 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "GameFramework/Pawn.h"
+#include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
+
+namespace
+{
+FText GetConversionEnergyTypeDisplayName(ETileType EnergyType)
+{
+	switch (EnergyType)
+	{
+	case ETileType::Construct:
+		return NSLOCTEXT("PlayerAttributeHUD", "ConstructEnergyDisplayName", "Construct");
+	case ETileType::Acid:
+		return NSLOCTEXT("PlayerAttributeHUD", "AcidEnergyDisplayName", "Acid");
+	default:
+		return NSLOCTEXT("PlayerAttributeHUD", "NoEnergyDisplayName", "None");
+	}
+}
+}
 
 void UPlayerAttributeHUDWidget::NativeConstruct()
 {
@@ -23,11 +40,21 @@ void UPlayerAttributeHUDWidget::NativeConstruct()
 		}
 	}
 
+	if (!ConversionEnergyComponent)
+	{
+		if (APawn* OwningPawn = GetOwningPlayerPawn())
+		{
+			BindToConversionEnergyComponent(OwningPawn->FindComponentByClass<UConversionEnergyComponent>());
+		}
+	}
+
 	RefreshAttributeDisplay();
+	RefreshConversionEnergyDisplay();
 }
 
 void UPlayerAttributeHUDWidget::NativeDestruct()
 {
+	UnbindFromConversionEnergyComponent();
 	UnbindFromAttributeComponent();
 	Super::NativeDestruct();
 }
@@ -36,6 +63,12 @@ void UPlayerAttributeHUDWidget::InitializeFromAttributeComponent(UPlayerAttribut
 {
 	BindToAttributeComponent(InAttributeComponent);
 	RefreshAttributeDisplay();
+}
+
+void UPlayerAttributeHUDWidget::InitializeFromConversionEnergyComponent(UConversionEnergyComponent* InEnergyComponent)
+{
+	BindToConversionEnergyComponent(InEnergyComponent);
+	RefreshConversionEnergyDisplay();
 }
 
 void UPlayerAttributeHUDWidget::RefreshAttributeDisplay()
@@ -86,6 +119,26 @@ void UPlayerAttributeHUDWidget::RefreshAttributeDisplay()
 	}
 }
 
+void UPlayerAttributeHUDWidget::RefreshConversionEnergyDisplay()
+{
+	if (EnergyText)
+	{
+		EnergyText->SetText(GetConversionEnergyStatusText());
+	}
+}
+
+FText UPlayerAttributeHUDWidget::GetConversionEnergyStatusText() const
+{
+	if (!ConversionEnergyComponent || !ConversionEnergyComponent->HasConversionEnergy())
+	{
+		return NSLOCTEXT("PlayerAttributeHUD", "ConversionEnergyNoneFormat", "Energy: None");
+	}
+
+	return FText::Format(
+		NSLOCTEXT("PlayerAttributeHUD", "ConversionEnergyHeldFormat", "Energy: {0}"),
+		GetConversionEnergyTypeDisplayName(ConversionEnergyComponent->GetHeldConversionEnergyType()));
+}
+
 void UPlayerAttributeHUDWidget::HandlePlayerAttributeChanged(int32 NewConstructValue, int32 NewAcidValue)
 {
 	// Values are pulled from the component to keep one formatting path for initial and event refreshes.
@@ -97,9 +150,14 @@ void UPlayerAttributeHUDWidget::HandlePlayerHealthChanged(int32 NewHealth, int32
 	RefreshAttributeDisplay();
 }
 
+void UPlayerAttributeHUDWidget::HandleConversionEnergyChanged(bool bHasEnergy, ETileType EnergyType)
+{
+	RefreshConversionEnergyDisplay();
+}
+
 void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 {
-	if (!WidgetTree || HealthText || HealthProgressBar || ConstructText || AcidText || ConstructProgressBar || AcidProgressBar)
+	if (!WidgetTree || HealthText || HealthProgressBar || ConstructText || AcidText || ConstructProgressBar || AcidProgressBar || EnergyText)
 	{
 		// Widget Blueprints with named bindings keep their authored layout.
 		return;
@@ -114,6 +172,7 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 	ConstructProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("ConstructProgressBar"));
 	AcidText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("AcidText"));
 	AcidProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("AcidProgressBar"));
+	EnergyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("EnergyText"));
 
 	if (HealthText)
 	{
@@ -147,6 +206,12 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 	{
 		RootBox->AddChildToVerticalBox(AcidProgressBar);
 	}
+
+	if (EnergyText)
+	{
+		EnergyText->SetText(NSLOCTEXT("PlayerAttributeHUD", "EnergyInitialText", "Energy: None"));
+		RootBox->AddChildToVerticalBox(EnergyText);
+	}
 }
 
 void UPlayerAttributeHUDWidget::BindToAttributeComponent(UPlayerAttributeComponent* InAttributeComponent)
@@ -175,5 +240,30 @@ void UPlayerAttributeHUDWidget::UnbindFromAttributeComponent()
 		AttributeComponent->OnPlayerAttributeChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandlePlayerAttributeChanged);
 		AttributeComponent->OnPlayerHealthChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandlePlayerHealthChanged);
 		AttributeComponent = nullptr;
+	}
+}
+
+void UPlayerAttributeHUDWidget::BindToConversionEnergyComponent(UConversionEnergyComponent* InEnergyComponent)
+{
+	if (ConversionEnergyComponent == InEnergyComponent)
+	{
+		return;
+	}
+
+	UnbindFromConversionEnergyComponent();
+	ConversionEnergyComponent = InEnergyComponent;
+
+	if (ConversionEnergyComponent)
+	{
+		ConversionEnergyComponent->OnConversionEnergyChanged.AddDynamic(this, &UPlayerAttributeHUDWidget::HandleConversionEnergyChanged);
+	}
+}
+
+void UPlayerAttributeHUDWidget::UnbindFromConversionEnergyComponent()
+{
+	if (ConversionEnergyComponent)
+	{
+		ConversionEnergyComponent->OnConversionEnergyChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleConversionEnergyChanged);
+		ConversionEnergyComponent = nullptr;
 	}
 }

@@ -11,6 +11,7 @@
 #include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
 #include "Grid/TileEffectResolverComponent.h"
+#include "Pickup/GridPickupManager.h"
 #include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
 
@@ -63,6 +64,7 @@ void AGridPawn::BeginPlay()
 	AGridManager* FoundGridManager = nullptr;
 	ATurnManager* FoundTurnManager = nullptr;
 	AGridEnemyManager* FoundEnemyManager = nullptr;
+	AGridPickupManager* FoundPickupManager = nullptr;
 
 	// Prototype convenience path: test maps can place managers without Blueprint wiring.
 	for (TActorIterator<AGridManager> It(GetWorld()); It; ++It)
@@ -83,6 +85,12 @@ void AGridPawn::BeginPlay()
 		break;
 	}
 
+	for (TActorIterator<AGridPickupManager> It(GetWorld()); It; ++It)
+	{
+		FoundPickupManager = *It;
+		break;
+	}
+
 	if (!FoundGridManager || !FoundTurnManager)
 	{
 		UE_LOG(LogGridPawn, Warning, TEXT("Auto initialization skipped: GridManager or TurnManager not found."));
@@ -99,6 +107,11 @@ void AGridPawn::BeginPlay()
 	{
 		EnemyManager = FoundEnemyManager;
 		EnemyManager->InitializeEnemyManager(FoundGridManager, FoundTurnManager, this);
+	}
+
+	if (FoundPickupManager)
+	{
+		PickupManager = FoundPickupManager;
 	}
 
 	if (bInitializedOnGrid)
@@ -263,6 +276,7 @@ void AGridPawn::TryMove(FIntPoint Direction)
 		// Tile effects are resolved only after RequestMove succeeds, so failed movement never changes attributes.
 		TileEffectResolverComponent->ResolveTileEnterEffect(this, CurrentGridCoord);
 	}
+	ResolvePickupAtCurrentTile();
 	TurnManager->AddStep();
 	StartVisualMove(FromLocation, ToLocation);
 }
@@ -304,11 +318,8 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 			// A successful kill leaves the player occupying the target tile, so normal tile-enter effects apply.
 			TileEffectResolverComponent->ResolveTileEnterEffect(this, CurrentGridCoord);
 		}
+		ResolvePickupAtCurrentTile();
 
-		if (ConversionEnergyComponent)
-		{
-			ConversionEnergyComponent->GrantConversionEnergy(DroppedEnergyType);
-		}
 		OnPlayerKilledEnemy(EnemyActor, DroppedEnergyType);
 
 		TurnManager->AddStep();
@@ -372,6 +383,29 @@ void AGridPawn::FindEnemyManagerIfNeeded()
 			EnemyManager->InitializeEnemyManager(GridManager, TurnManager, this);
 		}
 		break;
+	}
+}
+
+void AGridPawn::FindPickupManagerIfNeeded()
+{
+	if (PickupManager || !GetWorld())
+	{
+		return;
+	}
+
+	for (TActorIterator<AGridPickupManager> It(GetWorld()); It; ++It)
+	{
+		PickupManager = *It;
+		break;
+	}
+}
+
+void AGridPawn::ResolvePickupAtCurrentTile()
+{
+	FindPickupManagerIfNeeded();
+	if (PickupManager)
+	{
+		PickupManager->TryCollectPickupAt(CurrentGridCoord, this);
 	}
 }
 

@@ -11,4 +11,5 @@
 ## 相关模块
 
 - [地块属性与转换能量](../02_TileAttributesAndEnergy/README.md)：地块类型变化、属性效果和转换能量依赖核心棋盘坐标与地块接口。
+- [可拾取道具系统](../02_TileAttributesAndEnergy/Pickup_SystemGuide.md)：拾取物使用棋盘坐标和奖励候选点生成，但不占用 GridManager 的 Occupant 状态。
 - [战斗与敌人](../03_CombatAndEnemies/README.md)：攻击和敌人行动依赖棋盘占格、移动和回合调度。

@@ -148,7 +148,7 @@
 | `OnRangedAimStarted` | `PlayerPawn`, `AttackTiles` | 无 | `BlueprintImplementableEvent`。远程敌人进入瞄准模式后触发 |
 | `OnRangedAttackResolved` | `PlayerPawn`, `AttackTiles`, `AttackResult`, `bHitPlayer` | 无 | `BlueprintImplementableEvent`。远程攻击线结算后触发 |
 | `OnRangedAimCleared` | 无 | 无 | `BlueprintImplementableEvent`。远程瞄准状态被清除后触发 |
-| `OnGridEnemyKilled` | `Enemy`, `DeathCoord`, `DeathWorldLocation` | 无 | 敌人死亡广播。`AGridEnemyManager` 会监听该事件并触发死亡地块相机聚焦 |
+| `OnGridEnemyKilled` | `Enemy`, `DeathCoord`, `DeathWorldLocation` | 无 | 敌人死亡广播。`AGridEnemyManager` 会监听该事件，触发死亡地块相机聚焦，并给玩家授予 1 格通用转换能量 |
 | `Kill` | 无 | 无 | 标记死亡、广播 `OnGridEnemyKilled`、隐藏 Actor、关闭碰撞 |
 
 ### 默认敌人 AI
@@ -425,7 +425,7 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 | `OnRangedAimStarted` | `AGridEnemyPawn` | 远程敌人锁定攻击线后 | 可播放瞄准、警告音效或额外 UI |
 | `OnRangedAttackResolved` | `AGridEnemyPawn` | 远程攻击线结算完成后 | 可根据 `AttackTiles`、`AttackResult` 和 `bHitPlayer` 播放开火、受击或落空表现 |
 | `OnRangedAimCleared` | `AGridEnemyPawn` | 远程瞄准状态被清除后 | 可清理蓝图侧额外提示 |
-| `OnGridEnemyKilled` | `AGridEnemyPawn` | `Kill()` 标记敌人死亡时 | `AGridEnemyManager` 监听后通知 `AGridPlayerController`，让相机短暂聚焦死亡地块 |
+| `OnGridEnemyKilled` | `AGridEnemyPawn` | `Kill()` 标记敌人死亡时 | `AGridEnemyManager` 监听后通知 `AGridPlayerController` 聚焦死亡地块，并通过玩家 `ConversionEnergyComponent` 授予转换能量 |
 
 如果后续需要 UI 或特效直接响应玩家攻击敌人的结果，建议新增 `OnPlayerMeleeAttackResolved` 一类的事件，并广播 `FCombatResolveResult`、目标敌人和目标坐标。敌人攻击玩家的结果当前已通过 `OnMeleeAttackResolved` 暴露给蓝图表现层。
 

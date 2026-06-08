@@ -7,7 +7,7 @@
 | 模块 | 入口 | 内容范围 |
 | --- | --- | --- |
 | 核心棋盘与回合 | [01_CoreGrid](01_CoreGrid/README.md) | 棋盘生成、格子数据、移动接口、输入、回合锁 |
-| 地块属性与转换能量 | [02_TileAttributesAndEnergy](02_TileAttributesAndEnergy/README.md) | 地块属性效果、玩家双属性值、HUD、压制状态、击杀能量、3x3 地块转换 |
+| 地块属性与转换能量 | [02_TileAttributesAndEnergy](02_TileAttributesAndEnergy/README.md) | 地块属性效果、玩家双属性值、HUD、压制状态、击杀能量、3x3 地块转换、可拾取道具 |
 | 战斗与敌人 | [03_CombatAndEnemies](03_CombatAndEnemies/README.md) | 近战攻击、敌人属性、免疫与阈值击杀、敌人管理器、敌方行动调度 |
 | 项目规划 | [04_ProjectPlanning](04_ProjectPlanning/README.md) | GDD、技术实现需求、开发任务清单、阶段划分、里程碑 |
 

@@ -12,27 +12,49 @@ bool UConversionEnergyComponent::HasConversionEnergy() const
 
 ETileType UConversionEnergyComponent::GetHeldConversionEnergyType() const
 {
-	return HeldConversionEnergyType;
+	return bHasConversionEnergy ? HeldConversionEnergyType : ETileType::Minimal;
 }
 
-void UConversionEnergyComponent::GrantConversionEnergy(ETileType NewEnergyType)
+void UConversionEnergyComponent::GrantConversionEnergy(ETileType IgnoredEnergyType)
 {
-	if (!IsGrantableEnergyType(NewEnergyType))
-	{
-		return;
-	}
+	(void)IgnoredEnergyType;
 
 	const bool bWasHoldingEnergy = bHasConversionEnergy;
-	const ETileType PreviousEnergyType = HeldConversionEnergyType;
+
+	if (!IsSelectableEnergyType(HeldConversionEnergyType))
+	{
+		HeldConversionEnergyType = ETileType::Construct;
+	}
 
 	bHasConversionEnergy = true;
-	HeldConversionEnergyType = NewEnergyType;
 
 	OnConversionEnergyGranted.Broadcast(HeldConversionEnergyType);
-	if (!bWasHoldingEnergy || PreviousEnergyType != HeldConversionEnergyType)
+	if (!bWasHoldingEnergy)
 	{
 		OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, HeldConversionEnergyType);
 	}
+}
+
+bool UConversionEnergyComponent::SetHeldConversionEnergyType(ETileType NewEnergyType)
+{
+	if (!bHasConversionEnergy || !IsSelectableEnergyType(NewEnergyType) || HeldConversionEnergyType == NewEnergyType)
+	{
+		return false;
+	}
+
+	HeldConversionEnergyType = NewEnergyType;
+	OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, HeldConversionEnergyType);
+	return true;
+}
+
+bool UConversionEnergyComponent::CycleHeldConversionEnergyType()
+{
+	if (!bHasConversionEnergy)
+	{
+		return false;
+	}
+
+	return SetHeldConversionEnergyType(GetNextSelectableEnergyType(HeldConversionEnergyType));
 }
 
 bool UConversionEnergyComponent::ConsumeConversionEnergy()
@@ -44,26 +66,36 @@ bool UConversionEnergyComponent::ConsumeConversionEnergy()
 
 	const ETileType ConsumedEnergyType = HeldConversionEnergyType;
 	bHasConversionEnergy = false;
-	HeldConversionEnergyType = ETileType::Minimal;
 
 	OnConversionEnergyConsumed.Broadcast(ConsumedEnergyType);
-	OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, HeldConversionEnergyType);
+	OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, ETileType::Minimal);
 	return true;
 }
 
 void UConversionEnergyComponent::ClearConversionEnergy()
 {
-	if (!bHasConversionEnergy && HeldConversionEnergyType == ETileType::Minimal)
+	if (!bHasConversionEnergy)
 	{
 		return;
 	}
 
 	bHasConversionEnergy = false;
-	HeldConversionEnergyType = ETileType::Minimal;
-	OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, HeldConversionEnergyType);
+	OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, ETileType::Minimal);
 }
 
-bool UConversionEnergyComponent::IsGrantableEnergyType(ETileType EnergyType) const
+bool UConversionEnergyComponent::IsSelectableEnergyType(ETileType EnergyType) const
 {
 	return EnergyType == ETileType::Construct || EnergyType == ETileType::Acid;
+}
+
+ETileType UConversionEnergyComponent::GetNextSelectableEnergyType(ETileType EnergyType) const
+{
+	switch (EnergyType)
+	{
+	case ETileType::Construct:
+		return ETileType::Acid;
+	case ETileType::Acid:
+	default:
+		return ETileType::Construct;
+	}
 }

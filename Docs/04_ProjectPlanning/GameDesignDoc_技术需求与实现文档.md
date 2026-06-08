@@ -170,7 +170,7 @@
 - `UDungeonGenerationSettings` 是独立的地牢生成 DataAsset，承载 Seed、地图尺寸、L-System axiom/rules、迭代次数、房间半径、边界噪声、房间间隔、走廊宽度、崎岖概率、地块属性概率、出生候选数量、最大生成尝试次数和起点安全半径。
 - `ULSystemDungeonGenerator::GenerateDungeonLayout()` 负责根据配置生成 `FGeneratedDungeonLayout`，其中包含格子布局、房间节点、连接边、起点、出口和出生候选点。
 - `ULSystemDungeonGenerator::ValidateConnectivity()` 使用 Flood Fill 校验所有房间中心从起点可达。
-- `ADungeonRunManager::GenerateAndInitializeRun()` 是运行时接入口，执行“生成布局 -> 应用到 GridManager -> 初始化玩家 -> 可选生成敌人 -> 初始化 EnemyManager -> 设置 PlayerInput”。
+- `ADungeonRunManager::GenerateAndInitializeRun()` 是运行时接入口，执行“生成布局 -> 应用到 GridManager -> 初始化玩家 -> 可选生成敌人 -> 可选生成拾取物 -> 初始化 EnemyManager -> 设置 PlayerInput”。
 
 当前阶段不依赖 UE PCG 插件。原因是本项目的首要需求是回合制逻辑格、可达性保证和种子复现；UE PCG Graph 更适合后续生成墙体 Mesh、装饰和场景资产散布。
 
@@ -206,10 +206,11 @@
 `ADungeonRunManager` 用于在关卡中串联 PCG 与现有棋盘玩法：
 
 - `DungeonGenerationSettings`：地牢生成配置 DataAsset。
-- `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`：可手动指定，也可通过 `bAutoFindReferences` 自动查找。
+- `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`、`PickupManager`：可手动指定，也可通过 `bAutoFindReferences` 自动查找。
 - `bGenerateOnBeginPlay`：BeginPlay 时自动生成并初始化。
 - `bInitializePlayer`：将玩家初始化到 `LastGeneratedLayout.StartCoord`。
 - `bSpawnEnemies`：根据 `EnemySpawnCandidates` 生成敌人；敌人类型从 `DungeonGenerationSettings.EnemySpawnPool` 中按深度筛选并按权重选择，生成后按池条目的阈值规则写入敌人 `KillThreshold`。
+- `bSpawnPickups`：根据 `RewardSpawnCandidates` 生成拾取物；道具类型从 `DungeonGenerationSettings.PickupSpawnPool` 中按深度筛选并按权重选择。
 - `LastGeneratedLayout`：保存最近一次生成结果，供蓝图调试和后续系统读取。
 
 敌人生成使用 deferred spawn，先关闭敌人的自动网格初始化，再根据候选点深度计算 `KillThreshold`，最后调用 `InitializeOnGrid(GridManager, CandidateCoord)`，避免敌人先占用默认 `StartGridCoord`。
@@ -229,6 +230,16 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 ```
 
 其中 `BaseKillThreshold` 优先取 `KillThresholdOverride`，未配置覆盖时取敌人实例自身的 `KillThreshold`。
+
+拾取物生成使用 deferred spawn，从 `RewardSpawnCandidates` 中取可通行、未被占据、未已有道具的坐标。生成后调用 `InitializeOnGrid(GridManager, CandidateCoord)`，并注册到 `AGridPickupManager`。拾取物不写入 `FTileData.OccupantType`，因此不会阻挡玩家移动。
+
+`PickupSpawnPool` 单项字段：
+
+- `PickupClass`：被生成的 `AGridPickupActor` 或其子类。
+- `Weight`：同一候选深度下的相对抽取权重。
+- `MinDepth` / `MaxDepth`：该道具类型允许出现的候选深度范围。
+
+首个具体道具为 `AGridHealthPickupActor` / `BP_HealthPickup`，默认调用 `UPlayerAttributeComponent::Heal(1)` 回复 1 点 HP。
 
 ---
 
@@ -511,13 +522,16 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `FLSystemDungeonConnection`：房间连接边，包含起止房间和走廊路径
 - `FDungeonSpawnCandidate`：生成后的候选出生/事件/奖励坐标，包含坐标、区域 ID 和深度
 - `FGeneratedDungeonLayout`：一次地牢生成的完整输出，包含尺寸、Seed、格子布局、房间、连接、起点、出口和候选点
+- `FDungeonPickupSpawnEntry`：拾取物生成池条目，包含道具类、权重和深度范围
 - `FPlayerState`：HP、构成值、酸性值、当前持有能量、位置
 - `FEnemyState`：阵营、行为类型、HP阈值、状态机、位置、是否压制
 - `FEnemyAttackDamage`：敌人对玩家造成的 HP 伤害、构成值变化、酸性值变化
 - `FEnemyAttackResolveResult`：敌人攻击玩家后的伤害是否生效、玩家是否失败、剩余 HP
 - `FTurnContext`：当前步数、动作来源、事件列表
 - `UDungeonGenerationSettings`：地牢生成 DataAsset，承载种子、L-System、房间、走廊和可达性约束
-- `ADungeonRunManager`：运行时 PCG 接入 Actor，负责生成布局、应用棋盘、初始化玩家和可选敌人
+- `ADungeonRunManager`：运行时 PCG 接入 Actor，负责生成布局、应用棋盘、初始化玩家、可选敌人和可选拾取物
+- `AGridPickupActor`：按棋盘坐标放置的可拾取道具基类，具体效果由子类或蓝图覆写
+- `AGridPickupManager`：按坐标注册、查询和结算拾取物的运行时管理器
 
 ### 11.3 存档建议
 

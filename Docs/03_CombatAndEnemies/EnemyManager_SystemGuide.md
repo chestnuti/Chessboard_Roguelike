@@ -25,7 +25,7 @@
 | `AGridManager` | 维护格子数据、占据状态、移动合法性和坐标转换 |
 | `ATurnManager` | 维护回合状态和玩家步数 |
 | `AGridEnemyPawn` | 表示单个敌人，持有阵营、行为类型、阈值、坐标、死亡状态和基础行动 |
-| `AGridEnemyManager` | 维护敌人列表，统一执行敌方回合 |
+| `AGridEnemyManager` | 维护敌人列表，统一执行敌方回合，并处理敌人死亡后的相机聚焦和玩家转换能量授予 |
 
 ## 新增文件
 
@@ -67,7 +67,7 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 | `OnRangedAimStarted()` | 蓝图可实现事件。远程敌人进入瞄准模式并生成攻击线后触发 |
 | `OnRangedAttackResolved()` | 蓝图可实现事件。远程攻击线结算完成后触发 |
 | `OnRangedAimCleared()` | 蓝图可实现事件。远程瞄准状态和地格提示被清除后触发 |
-| `OnGridEnemyKilled` | 敌人死亡广播。敌人管理器注册敌人时会订阅它，用于触发死亡地块相机聚焦 |
+| `OnGridEnemyKilled` | 敌人死亡广播。敌人管理器注册敌人时会订阅它，用于触发死亡地块相机聚焦，并给玩家授予 1 格通用转换能量 |
 | `ShouldDelayEnemyTurnEnd()` | 返回是否需要等待敌人移动视觉插值完成后再结束敌方回合 |
 
 ## GridManager 寻路 API
