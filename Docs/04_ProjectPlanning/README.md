@@ -15,3 +15,4 @@
 - [核心棋盘与回合](../01_CoreGrid/README.md)
 - [地块属性与转换能量](../02_TileAttributesAndEnergy/README.md)
 - [战斗与敌人](../03_CombatAndEnemies/README.md)
+- [教学关卡](../05_TutorialLevels/README.md)

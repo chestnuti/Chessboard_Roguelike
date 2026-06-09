@@ -10,13 +10,15 @@
 | 地块属性与转换能量 | [02_TileAttributesAndEnergy](02_TileAttributesAndEnergy/README.md) | 地块属性效果、玩家双属性值、HUD、压制状态、击杀能量、3x3 地块转换、可拾取道具 |
 | 战斗与敌人 | [03_CombatAndEnemies](03_CombatAndEnemies/README.md) | 近战攻击、敌人属性、免疫与阈值击杀、敌人管理器、敌方行动调度 |
 | 项目规划 | [04_ProjectPlanning](04_ProjectPlanning/README.md) | GDD、技术实现需求、开发任务清单、阶段划分、里程碑 |
+| 教学关卡 | [05_TutorialLevels](05_TutorialLevels/README.md) | 固定 10x10 教学地图、教学 DataAsset、5 张 Map 资产和验证脚本 |
 
 ## 推荐阅读路径
 
 1. 先读 [核心棋盘与回合](01_CoreGrid/README.md)，理解棋盘、移动和回合基础。
 2. 再读 [地块属性与转换能量](02_TileAttributesAndEnergy/README.md)，理解地块变化和属性资源。
 3. 接着读 [战斗与敌人](03_CombatAndEnemies/README.md)，理解攻击、敌人行动和相关边界。
-4. 最后读 [项目规划](04_ProjectPlanning/README.md)，对照 GDD、技术实现需求、当前功能和后续任务。
+4. 需要验证规则教学时，读 [教学关卡](05_TutorialLevels/README.md)，了解固定地图和教学资产。
+5. 最后读 [项目规划](04_ProjectPlanning/README.md)，对照 GDD、技术实现需求、当前功能和后续任务。
 
 ## 维护约定
 

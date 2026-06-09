@@ -1,7 +1,7 @@
 # 构成 / 酸性棋盘式肉鸽战术游戏
 ## 技术需求与实现文档
 
-版本：0.3
+版本：0.4
 来源：基于 [GameDesignDoc_完整.md](GameDesignDoc_完整.md)
 用途：技术策划拆解、程序开发对齐、原型验证与迭代评审
 
@@ -206,12 +206,26 @@
 `ADungeonRunManager` 用于在关卡中串联 PCG 与现有棋盘玩法：
 
 - `DungeonGenerationSettings`：地牢生成配置 DataAsset。
+- `GenerationMode`：运行生成模式。`Procedural` 使用 PCG；`TutorialFixed` 跳过 PCG，使用固定教学关卡数据。
+- `TutorialLevelSet`：教学关卡 DataAsset；未显式指定时可使用 C++ 默认教学配置。
+- `TutorialLevelIndex`：当前教学关卡索引。
 - `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`、`PickupManager`：可手动指定，也可通过 `bAutoFindReferences` 自动查找。
 - `bGenerateOnBeginPlay`：BeginPlay 时自动生成并初始化。
 - `bInitializePlayer`：将玩家初始化到 `LastGeneratedLayout.StartCoord`。
 - `bSpawnEnemies`：根据 `EnemySpawnCandidates` 生成敌人；敌人类型从 `DungeonGenerationSettings.EnemySpawnPool` 中按深度筛选并按权重选择，生成后按池条目的阈值规则写入敌人 `KillThreshold`。
 - `bSpawnPickups`：根据 `RewardSpawnCandidates` 生成拾取物；道具类型从 `DungeonGenerationSettings.PickupSpawnPool` 中按深度筛选并按权重选择。
 - `LastGeneratedLayout`：保存最近一次生成结果，供蓝图调试和后续系统读取。
+
+`GenerationMode == TutorialFixed` 时，`GenerateAndInitializeRun()` 调用 `GenerateTutorialRun()`，不执行 `ULSystemDungeonGenerator::GenerateDungeonLayout()`。教学模式会校验关卡定义必须是 `10 x 10` 且包含 100 个 `FGridTileLayoutData`，然后调用 `AGridManager::ApplyTileLayout()` 应用固定布局，并根据 `FTutorialEnemySpawnData` 逐个生成固定敌人。
+
+当前教学资产位于：
+
+- `Content/Data/Tutorial/DA_TutorialLevelSet.uasset`
+- `Content/Maps/Tutorial/L_Tutorial_01_TileAttributes.umap`
+- `Content/Maps/Tutorial/L_Tutorial_02_EnemyKills.umap`
+- `Content/Maps/Tutorial/L_Tutorial_03_ConversionEnergy.umap`
+- `Content/Maps/Tutorial/L_Tutorial_04_RangedFriendlyFire.umap`
+- `Content/Maps/Tutorial/L_Tutorial_05_FactionSuppression.umap`
 
 敌人生成使用 deferred spawn，先关闭敌人的自动网格初始化，再根据候选点深度计算 `KillThreshold`，最后调用 `InitializeOnGrid(GridManager, CandidateCoord)`，避免敌人先占用默认 `StartGridCoord`。
 
@@ -522,6 +536,8 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `FLSystemDungeonConnection`：房间连接边，包含起止房间和走廊路径
 - `FDungeonSpawnCandidate`：生成后的候选出生/事件/奖励坐标，包含坐标、区域 ID 和深度
 - `FGeneratedDungeonLayout`：一次地牢生成的完整输出，包含尺寸、Seed、格子布局、房间、连接、起点、出口和候选点
+- `FTutorialEnemySpawnData`：教学关卡固定敌人描述，包含坐标、敌人类、阵营、行为类型、击杀阈值和远程攻击距离
+- `FTutorialLevelDefinition`：教学关卡固定布局描述，包含关卡 ID、10x10 尺寸、玩家起点、出口、100 个地块和固定敌人列表
 - `FDungeonPickupSpawnEntry`：拾取物生成池条目，包含道具类、权重和深度范围
 - `FPlayerState`：HP、构成值、酸性值、当前持有能量、位置
 - `FEnemyState`：阵营、行为类型、HP阈值、状态机、位置、是否压制
@@ -529,7 +545,8 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `FEnemyAttackResolveResult`：敌人攻击玩家后的伤害是否生效、玩家是否失败、剩余 HP
 - `FTurnContext`：当前步数、动作来源、事件列表
 - `UDungeonGenerationSettings`：地牢生成 DataAsset，承载种子、L-System、房间、走廊和可达性约束
-- `ADungeonRunManager`：运行时 PCG 接入 Actor，负责生成布局、应用棋盘、初始化玩家、可选敌人和可选拾取物
+- `UTutorialLevelSet`：教学关卡 DataAsset，承载固定教学布局和固定敌人配置
+- `ADungeonRunManager`：运行时关卡初始化 Actor，支持 PCG 模式和固定教学模式，负责生成或读取布局、应用棋盘、初始化玩家、可选敌人、固定教学敌人和可选拾取物
 - `AGridPickupActor`：按棋盘坐标放置的可拾取道具基类，具体效果由子类或蓝图覆写
 - `AGridPickupManager`：按坐标注册、查询和结算拾取物的运行时管理器
 
@@ -596,6 +613,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 完成远程敌人蓄力逻辑
 - 完成友伤清除链表现与压制状态反馈
 - 完成基础 UI 和反馈
+- 完成 5 个固定教学关卡 Map 与教学 DataAsset
 - 完成房间级胜负流转
 - 完成多房间激活与无缝推进
 
@@ -691,6 +709,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 地块转换不会覆盖障碍物与特殊事件。
 - 压制状态与免疫效果可叠加，被压制敌人仍保持对应免疫。
 - 关卡采用多房间无缝推进，敌人在房间激活后参与行动，未清理完的敌人可继续追逐玩家进入新房间。
+- 教学关卡固定使用 `10 x 10` 地图，不调用 PCG；敌人由 `DA_TutorialLevelSet` 的固定列表生成。
 
 ---
 

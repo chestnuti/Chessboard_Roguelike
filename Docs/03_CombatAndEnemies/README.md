@@ -14,3 +14,4 @@
 
 - [核心棋盘与回合](../01_CoreGrid/README.md)：敌人占格、移动和行动回合依赖棋盘与 TurnManager。
 - [地块属性与转换能量](../02_TileAttributesAndEnergy/README.md)：战斗击杀会触发地块转换能量，敌人行动会受玩家属性满值压制影响。
+- [教学关卡](../05_TutorialLevels/README.md)：关卡 2 验证敌人免疫与阈值击杀，关卡 4 验证远程敌人和友伤。

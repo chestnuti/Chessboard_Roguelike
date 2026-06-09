@@ -12,6 +12,7 @@
 #include "Pickup/GridPickupActor.h"
 #include "Pickup/GridPickupManager.h"
 #include "Player/GridPawn.h"
+#include "Tutorial/TutorialLevelSet.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDungeonRunManager, Log, All);
 
@@ -37,47 +38,58 @@ bool ADungeonRunManager::GenerateAndInitializeRun()
 		ResolveRuntimeReferences();
 	}
 
-	if (!DungeonGenerationSettings)
-	{
-		UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateAndInitializeRun failed: DungeonGenerationSettings is not assigned."));
-		return false;
-	}
-
 	if (PlayerPawn)
 	{
 		// PCG owns the start coordinate, so prevent the pawn from occupying its authored prototype start first.
 		PlayerPawn->bAutoInitializeOnBeginPlay = false;
 	}
 
-	if (!ULSystemDungeonGenerator::GenerateDungeonLayout(DungeonGenerationSettings, LastGeneratedLayout))
+	const bool bUseTutorialFixed = GenerationMode == EDungeonRunGenerationMode::TutorialFixed;
+	if (bUseTutorialFixed)
 	{
-		UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateAndInitializeRun failed: layout generation failed."));
-		return false;
+		if (!GenerateTutorialRun())
+		{
+			return false;
+		}
 	}
-
-	if (!ApplyGeneratedLayout())
+	else
 	{
-		return false;
-	}
+		if (!DungeonGenerationSettings)
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateAndInitializeRun failed: DungeonGenerationSettings is not assigned."));
+			return false;
+		}
 
-	if (bInitializePlayer && !InitializePlayerFromLayout())
-	{
-		return false;
-	}
+		if (!ULSystemDungeonGenerator::GenerateDungeonLayout(DungeonGenerationSettings, LastGeneratedLayout))
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateAndInitializeRun failed: layout generation failed."));
+			return false;
+		}
 
-	if (bSpawnEnemies)
-	{
-		SpawnEnemiesFromLayout();
-	}
+		if (!ApplyGeneratedLayout())
+		{
+			return false;
+		}
 
-	if (bSpawnPickups)
-	{
-		SpawnPickupsFromLayout();
+		if (bInitializePlayer && !InitializePlayerFromLayout())
+		{
+			return false;
+		}
+
+		if (bSpawnEnemies)
+		{
+			SpawnEnemiesFromLayout();
+		}
+
+		if (bSpawnPickups)
+		{
+			SpawnPickupsFromLayout();
+		}
 	}
 
 	if (EnemyManager && GridManager && TurnManager && PlayerPawn)
 	{
-		// Rebuild after optional spawning so placed enemies and PCG-spawned enemies share the same manager list.
+		// Rebuild after optional spawning so placed enemies and runtime-spawned enemies share the same manager list.
 		EnemyManager->InitializeEnemyManager(GridManager, TurnManager, PlayerPawn);
 		EnemyManager->RebuildEnemyList();
 	}
@@ -87,7 +99,8 @@ bool ADungeonRunManager::GenerateAndInitializeRun()
 		TurnManager->SetTurnState(ETurnState::PlayerInput);
 	}
 
-	UE_LOG(LogDungeonRunManager, Log, TEXT("Dungeon run initialized: seed=%d rooms=%d enemyCandidates=%d rewardCandidates=%d."),
+	UE_LOG(LogDungeonRunManager, Log, TEXT("Dungeon run initialized: mode=%s seed=%d rooms=%d enemyCandidates=%d rewardCandidates=%d."),
+		bUseTutorialFixed ? TEXT("TutorialFixed") : TEXT("Procedural"),
 		LastGeneratedLayout.Seed,
 		LastGeneratedLayout.Rooms.Num(),
 		LastGeneratedLayout.EnemySpawnCandidates.Num(),
@@ -149,6 +162,137 @@ void ADungeonRunManager::ResolveRuntimeReferences()
 	}
 }
 
+bool ADungeonRunManager::GenerateTutorialRun()
+{
+	const UTutorialLevelSet* ResolvedLevelSet = TutorialLevelSet ? TutorialLevelSet.Get() : GetDefault<UTutorialLevelSet>();
+	if (!ResolvedLevelSet)
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateTutorialRun failed: TutorialLevelSet is missing."));
+		return false;
+	}
+
+	if (!ResolvedLevelSet->TutorialLevels.IsValidIndex(TutorialLevelIndex))
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateTutorialRun failed: TutorialLevelIndex %d is outside level count %d."),
+			TutorialLevelIndex, ResolvedLevelSet->TutorialLevels.Num());
+		return false;
+	}
+
+	const FTutorialLevelDefinition& TutorialLevel = ResolvedLevelSet->TutorialLevels[TutorialLevelIndex];
+	if (!ApplyTutorialLevel(TutorialLevel))
+	{
+		return false;
+	}
+
+	if (bInitializePlayer && !InitializePlayerAtCoord(TutorialLevel.StartCoord))
+	{
+		return false;
+	}
+
+	SpawnTutorialEnemies(TutorialLevel);
+	return true;
+}
+
+bool ADungeonRunManager::ApplyTutorialLevel(const FTutorialLevelDefinition& TutorialLevel)
+{
+	if (!GridManager)
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("ApplyTutorialLevel failed: GridManager is not assigned."));
+		return false;
+	}
+
+	if (TutorialLevel.Width != 10 || TutorialLevel.Height != 10)
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("ApplyTutorialLevel failed: %s is %d x %d, expected 10 x 10."),
+			*TutorialLevel.LevelId.ToString(), TutorialLevel.Width, TutorialLevel.Height);
+		return false;
+	}
+
+	const int32 ExpectedTileCount = TutorialLevel.Width * TutorialLevel.Height;
+	if (TutorialLevel.Tiles.Num() != ExpectedTileCount)
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("ApplyTutorialLevel failed: %s has %d tiles, expected %d."),
+			*TutorialLevel.LevelId.ToString(), TutorialLevel.Tiles.Num(), ExpectedTileCount);
+		return false;
+	}
+
+	LastGeneratedLayout = FGeneratedDungeonLayout();
+	LastGeneratedLayout.Width = TutorialLevel.Width;
+	LastGeneratedLayout.Height = TutorialLevel.Height;
+	LastGeneratedLayout.Seed = TutorialLevelIndex;
+	LastGeneratedLayout.Tiles = TutorialLevel.Tiles;
+	LastGeneratedLayout.StartCoord = TutorialLevel.StartCoord;
+	LastGeneratedLayout.ExitCoord = TutorialLevel.ExitCoord;
+
+	return GridManager->ApplyTileLayout(LastGeneratedLayout.Tiles, LastGeneratedLayout.Width, LastGeneratedLayout.Height);
+}
+
+bool ADungeonRunManager::InitializePlayerAtCoord(FIntPoint StartCoord)
+{
+	if (!PlayerPawn || !GridManager || !TurnManager)
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("InitializePlayerAtCoord failed: PlayerPawn, GridManager, or TurnManager is missing."));
+		return false;
+	}
+
+	if (!GridManager->IsWalkable(StartCoord))
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("InitializePlayerAtCoord failed: start coord (%d,%d) is not walkable."),
+			StartCoord.X, StartCoord.Y);
+		return false;
+	}
+
+	PlayerPawn->InitializeOnGrid(GridManager, TurnManager, StartCoord);
+	return true;
+}
+
+void ADungeonRunManager::SpawnTutorialEnemies(const FTutorialLevelDefinition& TutorialLevel)
+{
+	if (!GridManager || !GetWorld())
+	{
+		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnTutorialEnemies skipped: GridManager or World is missing."));
+		return;
+	}
+
+	for (const FTutorialEnemySpawnData& EnemyData : TutorialLevel.Enemies)
+	{
+		if (!GridManager->IsWalkable(EnemyData.Coord) || GridManager->IsOccupied(EnemyData.Coord))
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnTutorialEnemies skipped %s enemy at (%d,%d): tile is blocked or occupied."),
+				*TutorialLevel.LevelId.ToString(), EnemyData.Coord.X, EnemyData.Coord.Y);
+			continue;
+		}
+
+		TSubclassOf<AGridEnemyPawn> EnemyClass = EnemyData.EnemyClass;
+		if (!EnemyClass)
+		{
+			EnemyClass = AGridEnemyPawn::StaticClass();
+		}
+		const FTransform SpawnTransform(FRotator::ZeroRotator, GridManager->GridToWorld(EnemyData.Coord));
+		AGridEnemyPawn* Enemy = GetWorld()->SpawnActorDeferred<AGridEnemyPawn>(
+			EnemyClass,
+			SpawnTransform,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!Enemy)
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnTutorialEnemies failed at (%d,%d)."),
+				EnemyData.Coord.X, EnemyData.Coord.Y);
+			continue;
+		}
+
+		Enemy->bAutoInitializeOnBeginPlay = false;
+		Enemy->Faction = EnemyData.Faction;
+		Enemy->BehaviorType = EnemyData.BehaviorType;
+		Enemy->KillThreshold = FMath::Max(1, EnemyData.KillThreshold);
+		Enemy->MaxRangedAttackDistance = FMath::Max(0, EnemyData.MaxRangedAttackDistance);
+		Enemy->FinishSpawning(SpawnTransform);
+		Enemy->InitializeOnGrid(GridManager, EnemyData.Coord);
+		RegisterEnemyWithManager(Enemy);
+	}
+}
+
 bool ADungeonRunManager::ApplyGeneratedLayout()
 {
 	if (!GridManager)
@@ -162,21 +306,7 @@ bool ADungeonRunManager::ApplyGeneratedLayout()
 
 bool ADungeonRunManager::InitializePlayerFromLayout()
 {
-	if (!PlayerPawn || !GridManager || !TurnManager)
-	{
-		UE_LOG(LogDungeonRunManager, Warning, TEXT("InitializePlayerFromLayout failed: PlayerPawn, GridManager, or TurnManager is missing."));
-		return false;
-	}
-
-	if (!GridManager->IsWalkable(LastGeneratedLayout.StartCoord))
-	{
-		UE_LOG(LogDungeonRunManager, Warning, TEXT("InitializePlayerFromLayout failed: start coord (%d,%d) is not walkable."),
-			LastGeneratedLayout.StartCoord.X, LastGeneratedLayout.StartCoord.Y);
-		return false;
-	}
-
-	PlayerPawn->InitializeOnGrid(GridManager, TurnManager, LastGeneratedLayout.StartCoord);
-	return true;
+	return InitializePlayerAtCoord(LastGeneratedLayout.StartCoord);
 }
 
 void ADungeonRunManager::SpawnEnemiesFromLayout()
