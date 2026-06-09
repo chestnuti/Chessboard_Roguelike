@@ -14,7 +14,7 @@
 4. `AGridEnemyManager::HandleEnemyKilled()` 收到死亡事件后，通过玩家 Pawn 找到 `AGridPlayerController`。
 5. `AGridPlayerController::FocusCombatCameraOnGridTile()` 转发死亡格世界位置。
 6. `UCombatCameraDirectorComponent::FocusGridTileBriefly()` 在玩家当前视角目标或 Pawn 上查找 `USpringArmComponent`，缓存 SpringArm 的 Camera Lag 设置，并在聚焦期间临时关闭 Camera Lag。
-7. 组件根据死亡地块距离计算本次运行时聚焦时长，短暂修改 `TargetOffset` 和 `TargetArmLength`。
+7. 组件以固定时长把 SpringArm `TargetOffset` 从当前值缓动到死亡格世界位置对应的偏移，同时短暂修改 `TargetArmLength`。
 8. 聚焦结束后组件恢复 SpringArm 的原始 `TargetOffset`、`TargetArmLength` 和 Camera Lag 设置，并关闭自己的 Tick。
 
 ## 新增文件
@@ -47,10 +47,6 @@ Source/Chessboard_Roguelike/Private/Camera/CombatCameraDirectorComponent.cpp
 | `FocusInDuration` | `0.12` | 镜头偏向死亡地块的真实时间 |
 | `FocusHoldDuration` | `0.18` | 保持聚焦的真实时间 |
 | `FocusOutDuration` | `0.18` | 镜头恢复到原位的真实时间 |
-| `ExtraFocusInDurationAtMaxDistance` | `0.16` | 当死亡地块距离达到 `MaxFocusOffset` 时，额外增加的进入聚焦时间 |
-| `ExtraFocusHoldDurationAtMaxDistance` | `0.22` | 当死亡地块距离达到 `MaxFocusOffset` 时，额外增加的保持聚焦时间 |
-| `MaxFocusOffset` | `650` | 从玩家到死亡地块的最大平面偏移采样距离，避免远处死亡把镜头拉得过猛 |
-| `FocusOffsetScale` | `0.65` | 死亡地块平面偏移转换到 SpringArm `TargetOffset` 的比例 |
 | `ZoomInDistance` | `300` | 聚焦期间缩短的 SpringArm 臂长 |
 | `bDisableSpringArmLagDuringFocus` | `true` | 聚焦期间是否临时关闭 SpringArm 的 Camera Lag 和 Camera Rotation Lag |
 | `ConversionEnergyZoomInDuration` | `0.45` | 持有转换能量并长按输入时，镜头缓慢拉近所用时间 |
@@ -60,16 +56,21 @@ Source/Chessboard_Roguelike/Private/Camera/CombatCameraDirectorComponent.cpp
 
 组件使用 `GetWorld()->GetRealTimeSeconds()` 推进时间，因此全局 Time Dilation 或 HitStop 不会阻止镜头回退。
 
-运行时聚焦时长会按死亡地块与玩家之间的平面距离自适应：
+运行时聚焦时长固定，不随死亡地块距离变化：
 
 ```text
-DistanceAlpha = Clamp(Distance2D / MaxFocusOffset, 0, 1)
-RuntimeFocusInDuration = FocusInDuration + ExtraFocusInDurationAtMaxDistance * DistanceAlpha
-RuntimeFocusHoldDuration = FocusHoldDuration + ExtraFocusHoldDurationAtMaxDistance * DistanceAlpha
+RuntimeFocusInDuration = FocusInDuration
+RuntimeFocusHoldDuration = FocusHoldDuration
 RuntimeFocusOutDuration = FocusOutDuration
 ```
 
-这样近距离击杀仍然轻快，远距离友伤击杀会有更长的镜头进入和停留时间。
+死亡聚焦目标偏移直接由死亡格世界坐标计算：
+
+```text
+FocusTargetOffset = DeathWorldLocation - SpringArmWorldLocation
+```
+
+因此远距离敌人死亡时，SpringArm 会在同一段 `FocusInDuration` 内移动到死亡格对应位置，不再被最大偏移距离截断。进入聚焦和恢复阶段都使用 smoothstep 缓入缓出，避免固定时长移动在远距离情况下显得突然。
 
 ## 使用方式
 
@@ -116,8 +117,8 @@ RuntimeFocusOutDuration = FocusOutDuration
 2. 敌人死亡是否走到了 `AGridEnemyPawn::Kill()`，而不是只在蓝图里隐藏 Actor。
 3. 玩家 Pawn 是否能通过 `GetController()` 找到 `AGridPlayerController`。
 4. 当前 ViewTarget 或玩家 Pawn 是否存在 `USpringArmComponent`。
-5. 如果远距离击杀仍然看不清，确认 `bDisableSpringArmLagDuringFocus` 是否为 `true`。
-6. 如果聚焦停留太短，调高 `ExtraFocusHoldDurationAtMaxDistance` 或 `FocusHoldDuration`。
-7. 如果聚焦幅度太小，调高 `FocusOffsetScale` 或 `MaxFocusOffset`；如果太晃，降低两者或缩短 `ZoomInDistance`。
+5. 如果远距离击杀仍然看不清，确认 `bDisableSpringArmLagDuringFocus` 是否为 `true`，并确认死亡事件传入的是敌人死亡时的世界坐标。
+6. 如果聚焦停留太短，调高 `FocusHoldDuration`。
+7. 如果远距离移动太快或太慢，调整 `FocusInDuration`；如果恢复太快或太慢，调整 `FocusOutDuration`。
 8. 如果长按空格没有拉近镜头，检查 `UseEnergyAction` 是否在 `BP_GridPlayerController` 中赋值，或现有蓝图输入链路是否调用了 `BeginConversionEnergyCameraZoom()`。
 9. 如果没有能量时也触发了缩放，检查玩家 Pawn 是否已迁移到 `ConversionEnergyComponent`，或覆写 `CanStartConversionEnergyCameraZoom()` 做额外限制。

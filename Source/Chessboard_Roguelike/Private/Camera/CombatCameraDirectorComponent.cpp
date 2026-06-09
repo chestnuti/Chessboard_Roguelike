@@ -85,9 +85,8 @@ void UCombatCameraDirectorComponent::FocusGridTileBriefly(const FVector& TargetW
 	FocusTargetOffset = CalculateFocusTargetOffset(SpringArm, TargetWorldLocation);
 	FocusArmLength = FMath::Max(0.f, RestArmLength - ZoomInDistance);
 
-	const float DistanceAlpha = CalculateFocusDistanceAlpha(SpringArm, TargetWorldLocation);
-	RuntimeFocusInDuration = FocusInDuration + ExtraFocusInDurationAtMaxDistance * DistanceAlpha;
-	RuntimeFocusHoldDuration = FocusHoldDuration + ExtraFocusHoldDurationAtMaxDistance * DistanceAlpha;
+	RuntimeFocusInDuration = FocusInDuration;
+	RuntimeFocusHoldDuration = FocusHoldDuration;
 	RuntimeFocusOutDuration = FocusOutDuration;
 
 	ElapsedRealTime = 0.f;
@@ -212,37 +211,12 @@ FVector UCombatCameraDirectorComponent::CalculateFocusTargetOffset(
 	const USpringArmComponent* SpringArm,
 	const FVector& TargetWorldLocation) const
 {
-	const AActor* OwnerActor = GetOwner();
-	const APlayerController* PlayerController = Cast<APlayerController>(OwnerActor);
-	const AActor* OriginActor = PlayerController ? PlayerController->GetPawn() : OwnerActor;
-	const FVector OriginLocation = OriginActor ? OriginActor->GetActorLocation() : SpringArm->GetComponentLocation();
-
-	FVector PlanarDelta = TargetWorldLocation - OriginLocation;
-	PlanarDelta.Z = 0.f;
-
-	if (PlanarDelta.SizeSquared() > FMath::Square(MaxFocusOffset))
+	if (!SpringArm)
 	{
-		PlanarDelta = PlanarDelta.GetClampedToMaxSize(MaxFocusOffset);
+		return RestTargetOffset;
 	}
 
-	return RestTargetOffset + PlanarDelta * FocusOffsetScale;
-}
-
-float UCombatCameraDirectorComponent::CalculateFocusDistanceAlpha(
-	const USpringArmComponent* SpringArm,
-	const FVector& TargetWorldLocation) const
-{
-	if (!SpringArm || MaxFocusOffset <= KINDA_SMALL_NUMBER)
-	{
-		return 0.f;
-	}
-
-	const AActor* OwnerActor = GetOwner();
-	const APlayerController* PlayerController = Cast<APlayerController>(OwnerActor);
-	const AActor* OriginActor = PlayerController ? PlayerController->GetPawn() : OwnerActor;
-	const FVector OriginLocation = OriginActor ? OriginActor->GetActorLocation() : SpringArm->GetComponentLocation();
-
-	return FMath::Clamp(FVector::Dist2D(OriginLocation, TargetWorldLocation) / MaxFocusOffset, 0.f, 1.f);
+	return TargetWorldLocation - SpringArm->GetComponentLocation();
 }
 
 float UCombatCameraDirectorComponent::GetTotalDuration() const

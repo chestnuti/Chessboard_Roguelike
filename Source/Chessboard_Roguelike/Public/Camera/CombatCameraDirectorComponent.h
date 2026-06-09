@@ -26,18 +26,6 @@ public:
 	float FocusOutDuration = 0.18f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
-	float ExtraFocusInDurationAtMaxDistance = 0.16f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
-	float ExtraFocusHoldDurationAtMaxDistance = 0.22f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
-	float MaxFocusOffset = 650.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
-	float FocusOffsetScale = 0.65f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera", meta = (ClampMin = "0.0"))
 	float ZoomInDistance = 300.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat Camera")
@@ -97,7 +85,6 @@ private:
 
 	USpringArmComponent* FindSpringArm();
 	FVector CalculateFocusTargetOffset(const USpringArmComponent* SpringArm, const FVector& TargetWorldLocation) const;
-	float CalculateFocusDistanceAlpha(const USpringArmComponent* SpringArm, const FVector& TargetWorldLocation) const;
 	float GetTotalDuration() const;
 	void ApplyFocusState(float Alpha);
 	void CacheAndDisableSpringArmLag(USpringArmComponent* SpringArm);
