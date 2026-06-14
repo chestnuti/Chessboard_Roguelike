@@ -37,7 +37,8 @@
 3. 同阵营敌人不会造成友伤，移动失败且不改变占据。
 4. 不同阵营敌人按目标格地块类型结算死亡结果：`Construct` 地块击杀酸性敌人，`Acid` 地块击杀构成敌人，`Minimal` 地块击杀 `KillThreshold` 较低者，阈值相同则双方死亡。
 5. `AGridEnemyPawn` 根据结算结果调用 `Kill()` 并清空对应格子的占据；如果目标死亡且攻击者存活，攻击者会再通过 `RequestMove()` 进入目标格。
-6. 远程敌人后续射线命中敌人时可直接调用 `ApplyRangedFriendlyFireDamage()`；该函数内部使用 `ResolveEnemyRangedFriendlyFire()`，异阵营目标直接死亡，同阵营不受影响。
+6. 敌方回合中的远程待结算攻击由 `AGridEnemyManager::ResolvePendingRangedAttacks()` 统一批量处理：先收集本窗口内所有攻击线和友伤命中，再统一应用死亡，避免行动顺序决定谁先死。
+7. 蓝图或其他单发远程逻辑仍可直接调用 `ApplyRangedFriendlyFireDamage()`；该函数内部使用 `ResolveEnemyRangedFriendlyFire()`，异阵营目标直接死亡，同阵营不受影响。
 
 ## 攻击与退回规则
 
@@ -178,12 +179,13 @@
 1. 如果敌人与玩家在同一 X 轴或 Y 轴，且敌人与玩家之间没有 `Obstacle`，敌人进入 `AimingRangedAttack`。
 2. 进入瞄准后，敌人缓存 `PendingRangedAttackTiles`。这条线从敌人相邻格开始，沿瞄准方向延伸，直到遇到无效坐标或 `Obstacle`；`Obstacle` 格不会被包含。
 3. `URangedAttackTelegraphComponent` 使用缓存的攻击线生成地格提示。该提示是纯表现层，不会调用 `SetTileType()`，也不会改变地块属性或占据状态。
-4. 下一次敌方回合开始时，`AGridEnemyManager` 会先结算所有待结算远程攻击，再执行普通敌人行动。
+4. 下一次敌方回合开始时，`AGridEnemyManager` 会先批量结算所有待结算远程攻击，再执行普通敌人行动。
 5. 远程攻击按上一回合锁定的 `PendingRangedAttackTiles` 结算；玩家如果已经离开这条线，则不会被命中。
 6. 命中玩家时调用 `ApplyRangedAttackDamage()`，复用敌人的 `AttackDamage`、`AttackAttributeDamage` 和阵营属性伤害设置，但不会触发近战前冲或占据玩家格。
-7. 攻击线中如果包含其他敌人，会调用 `ApplyRangedFriendlyFireDamage()` 处理跨阵营远程友伤。
-8. 如果远程敌人在开火回合被玩家属性压制，会取消待结算攻击线并清除提示。
-9. 攻击结算后调用 `ClearRangedAimMode()`，清除攻击线缓存和 Telegraph 显示。
+7. 攻击线中如果包含其他敌人，敌人管理器会先用 `ResolveEnemyRangedFriendlyFire()` 收集所有跨阵营远程友伤结果，再统一清空占据并调用 `Kill()`。
+8. 如果两个不同阵营远程敌人在同一结算窗口内互相命中，双方都会进入统一死亡集合，因此双方同时死亡，不受遍历顺序影响。
+9. 如果远程敌人在开火回合被玩家属性压制，会取消待结算攻击线并清除提示。
+10. 攻击结算后调用 `ClearRangedAimMode()`，清除攻击线缓存和 Telegraph 显示。
 
 `URangedAttackTelegraphComponent` 默认复用 `GridSettings->TileMesh` 生成 `InstancedStaticMesh` 提示。可在敌人蓝图中配置 `TelegraphTileMesh`、`TelegraphMaterial`、`ZOffset` 和 `ScaleMultiplier`。如果未配置提示材质，组件仍会生成实例并使用网格默认材质；如果没有可用 Mesh，则只保留逻辑瞄准，不显示视觉提示。
 
@@ -362,7 +364,7 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 
 ```text
 同阵营：不造成伤害
-远程异阵营命中：目标直接死亡
+远程异阵营命中：目标直接死亡；同一结算窗口内互相命中时，同步进入死亡集合
 近战异阵营冲突：
   Construct 地块：Acid 敌人死亡
   Acid 地块：Construct 敌人死亡
@@ -558,7 +560,8 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 - 玩家 HP 归零后进入 `Defeat` 回合状态。
 - 敌人近战伤害结果可通过 `OnMeleeAttackResolved` 供蓝图表现层使用。
 - 敌人跨阵营近战冲突会通过 `ResolveEnemyMeleeCollision()` 统一结算，并由 `TryMoveToGridCoord()` 应用死亡和占格变化。
-- 远程敌人可通过 `ApplyRangedFriendlyFireDamage()` 复用 `ResolveEnemyRangedFriendlyFire()`，异阵营目标直接死亡。
+- 敌方回合中的远程友伤由 `AGridEnemyManager::ResolvePendingRangedAttacks()` 批量同步结算，异阵营目标直接死亡；互相命中的远程敌人会同时死亡。
+- 蓝图或其他单发远程逻辑可通过 `ApplyRangedFriendlyFireDamage()` 复用 `ResolveEnemyRangedFriendlyFire()`。
 - 远程敌人可在同 X/Y 且无遮挡时进入 `AimingRangedAttack`，通过 `URangedAttackTelegraphComponent` 显示锁定攻击线，并在下一次敌方回合开始时结算。
 - 远程攻击命中玩家时使用 `ApplyRangedAttackDamage()`，不会触发近战前冲或占据玩家所在格。
 - 敌人友伤结果可通过 `OnFriendlyFireResolved` 供蓝图表现层使用。
@@ -566,8 +569,6 @@ EffectiveSingleHitDamage = Max(EffectiveConstructDamage, EffectiveAcidDamage)
 
 未实现：
 
-- 敌人远程攻击。
-- 远程敌人同一结算窗口内的互击同步死亡调度。
 - 跨阵营清除链的专用队列、连锁表现和 UI 提示。
 - 击杀掉落地块转换能量。
 - 战斗专用音效和特效事件。

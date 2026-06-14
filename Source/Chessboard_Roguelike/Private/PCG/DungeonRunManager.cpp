@@ -98,6 +98,10 @@ bool ADungeonRunManager::GenerateAndInitializeRun()
 	{
 		TurnManager->SetTurnState(ETurnState::PlayerInput);
 	}
+	if (PlayerPawn)
+	{
+		PlayerPawn->RefreshPlayerNextMoveTiles();
+	}
 
 	UE_LOG(LogDungeonRunManager, Log, TEXT("Dungeon run initialized: mode=%s seed=%d rooms=%d enemyCandidates=%d rewardCandidates=%d."),
 		bUseTutorialFixed ? TEXT("TutorialFixed") : TEXT("Procedural"),

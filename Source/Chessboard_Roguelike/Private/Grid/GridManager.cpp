@@ -10,7 +10,10 @@ DEFINE_LOG_CATEGORY_STATIC(LogGridManager, Log, All);
 namespace
 {
 	constexpr int32 TileTypeCustomDataIndex = 0;
-	constexpr int32 TileTypeCustomDataFloatCount = 1;
+	constexpr int32 TileCoordXCustomDataIndex = 1;
+	constexpr int32 TileCoordYCustomDataIndex = 2;
+	constexpr int32 PlayerNextMoveCustomDataIndex = 3;
+	constexpr int32 TileCustomDataFloatCount = 4;
 
 	float TileTypeToCustomDataValue(ETileType TileType)
 	{
@@ -74,7 +77,7 @@ AGridManager::AGridManager()
 	TileISM = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("TileISM"));
 	TileISM->SetupAttachment(SceneRoot);
 	TileISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	TileISM->NumCustomDataFloats = TileTypeCustomDataFloatCount;
+	TileISM->NumCustomDataFloats = TileCustomDataFloatCount;
 }
 
 void AGridManager::OnConstruction(const FTransform& Transform)
@@ -171,13 +174,14 @@ void AGridManager::ClearGridState()
 {
 	Tiles.Empty();
 	TileInstanceIndices.Empty();
+	PlayerNextMoveTileCoords.Empty();
 	CurrentWidth = 0;
 	CurrentHeight = 0;
 
 	if (TileISM)
 	{
 		TileISM->ClearInstances();
-		TileISM->NumCustomDataFloats = TileTypeCustomDataFloatCount;
+		TileISM->NumCustomDataFloats = TileCustomDataFloatCount;
 		if (GridSettings && GridSettings->TileMesh)
 		{
 			TileISM->SetStaticMesh(GridSettings->TileMesh);
@@ -287,7 +291,7 @@ void AGridManager::RebuildTileVisuals()
 
 	TileISM->ClearInstances();
 	TileInstanceIndices.Empty();
-	TileISM->NumCustomDataFloats = TileTypeCustomDataFloatCount;
+	TileISM->NumCustomDataFloats = TileCustomDataFloatCount;
 	TileISM->SetStaticMesh(GridSettings->TileMesh);
 
 	if (CurrentWidth > 0 && CurrentHeight > 0)
@@ -333,7 +337,7 @@ void AGridManager::AddTileVisualInstance(const FTileData& TileData)
 	const int32 InstanceIndex = TileISM->AddInstance(FTransform(FRotator::ZeroRotator, GridToWorld(TileData.GridCoord), InstanceScale), true);
 	TileInstanceIndices.Add(TileData.GridCoord, InstanceIndex);
 
-	// Materials can read PerInstanceCustomData[0] to choose Minimal/Construct/Acid/Obstacle visuals.
+	// Materials can read PerInstanceCustomData[0..3] as TileType, GridCoord.X, GridCoord.Y, bPlayerCanMoveNext.
 	ApplyTileInstanceCustomData(TileData.GridCoord, TileData.TileType);
 }
 
@@ -409,10 +413,38 @@ void AGridManager::ApplyTileInstanceCustomData(const FIntPoint& Coord, ETileType
 	}
 
 	const float CustomDataValue = TileTypeToCustomDataValue(NewTileType);
-	if (!TileISM->SetCustomDataValue(*InstanceIndex, TileTypeCustomDataIndex, CustomDataValue, true))
+	const float PlayerNextMoveValue = PlayerNextMoveTileCoords.Contains(Coord) ? 1.f : 0.f;
+	const bool bWroteTileType = TileISM->SetCustomDataValue(*InstanceIndex, TileTypeCustomDataIndex, CustomDataValue, false);
+	const bool bWroteGridX = TileISM->SetCustomDataValue(*InstanceIndex, TileCoordXCustomDataIndex, static_cast<float>(Coord.X), false);
+	const bool bWroteGridY = TileISM->SetCustomDataValue(*InstanceIndex, TileCoordYCustomDataIndex, static_cast<float>(Coord.Y), false);
+	const bool bWrotePlayerNextMove = TileISM->SetCustomDataValue(*InstanceIndex, PlayerNextMoveCustomDataIndex, PlayerNextMoveValue, true);
+	if (!bWroteTileType || !bWroteGridX || !bWroteGridY || !bWrotePlayerNextMove)
 	{
-		UE_LOG(LogGridManager, Warning, TEXT("ApplyTileInstanceCustomData failed: InstanceIndex=%d CustomDataIndex=%d Value=%f NumCustomDataFloats=%d."),
-			*InstanceIndex, TileTypeCustomDataIndex, CustomDataValue, TileISM->NumCustomDataFloats);
+		UE_LOG(LogGridManager, Warning, TEXT("ApplyTileInstanceCustomData failed: InstanceIndex=%d TileType=%f Coord=(%d,%d) NextMove=%f NumCustomDataFloats=%d."),
+			*InstanceIndex, CustomDataValue, Coord.X, Coord.Y, PlayerNextMoveValue, TileISM->NumCustomDataFloats);
+	}
+}
+
+void AGridManager::SetTilePlayerNextMoveCustomData(const FIntPoint& Coord, bool bCanMoveNext)
+{
+	if (!TileISM)
+	{
+		return;
+	}
+
+	const int32* InstanceIndex = TileInstanceIndices.Find(Coord);
+	if (!InstanceIndex)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("SetTilePlayerNextMoveCustomData failed: coord (%d,%d) has no instance index."),
+			Coord.X, Coord.Y);
+		return;
+	}
+
+	const float CustomDataValue = bCanMoveNext ? 1.f : 0.f;
+	if (!TileISM->SetCustomDataValue(*InstanceIndex, PlayerNextMoveCustomDataIndex, CustomDataValue, true))
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("SetTilePlayerNextMoveCustomData failed: InstanceIndex=%d Value=%f NumCustomDataFloats=%d."),
+			*InstanceIndex, CustomDataValue, TileISM->NumCustomDataFloats);
 	}
 }
 
@@ -426,6 +458,38 @@ bool AGridManager::GetTileInstanceIndex(const FIntPoint& Coord, int32& OutInstan
 
 	OutInstanceIndex = INDEX_NONE;
 	return false;
+}
+
+void AGridManager::ClearPlayerNextMoveTiles()
+{
+	if (PlayerNextMoveTileCoords.IsEmpty())
+	{
+		return;
+	}
+
+	const TSet<FIntPoint> PreviousMoveCoords = PlayerNextMoveTileCoords;
+	PlayerNextMoveTileCoords.Empty();
+
+	for (const FIntPoint& Coord : PreviousMoveCoords)
+	{
+		SetTilePlayerNextMoveCustomData(Coord, false);
+	}
+}
+
+void AGridManager::SetPlayerNextMoveTiles(const TArray<FIntPoint>& MoveCoords)
+{
+	ClearPlayerNextMoveTiles();
+
+	for (const FIntPoint& Coord : MoveCoords)
+	{
+		if (!Tiles.Contains(Coord))
+		{
+			continue;
+		}
+
+		PlayerNextMoveTileCoords.Add(Coord);
+		SetTilePlayerNextMoveCustomData(Coord, true);
+	}
 }
 
 bool AGridManager::IsTileConvertible(const FIntPoint& Coord) const

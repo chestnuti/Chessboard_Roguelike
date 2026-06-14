@@ -164,6 +164,7 @@
 
 - `AGridManager` 仍然是运行时棋盘权威数据源，但不再只支持固定矩形默认生成。
 - `AGridManager::ApplyTileLayout(TileLayout, LayoutWidth, LayoutHeight)` 提供统一入口，用于把程序生成的布局写入 `Tiles` 并重建 ISM 视觉实例。
+- `TileISM` 为每个格子实例写入 4 个 `PerInstanceCustomData`：`[0] = TileType`、`[1] = GridCoord.X`、`[2] = GridCoord.Y`、`[3] = bPlayerCanMoveNext`。棋盘材质应通过该通道读取地块类型、逻辑坐标和玩家下一步可移动格标记，避免用世界坐标反推格子位置。
 - `FGridTileLayoutData` 是 PCG 到 GridManager 的轻量数据载体，生成器应输出该结构数组，而不是直接修改 `Tiles`。
 - `EGridCellRole` 用于描述地图形态语义，包括 `Open`、`Room`、`Corridor`、`Wall`、`Start`、`Exit`。它与 `ETileType` 分离，避免把房间/走廊/墙体语义混入构成、酸性、极简、障碍等地块属性。
 - `FTileData` 新增 `CellRole`、`RegionId`、`Depth`，用于记录房间节点、区域层级和后续房间激活/难度分层。
@@ -373,8 +374,9 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `UCombatResolverComponent::ResolveEnemyMeleeCollision()` 负责结算两个敌人在同一目标格发生的近战冲突，只返回 `FEnemyFriendlyFireResolveResult`，不直接修改 Actor 或格子。
 - `AGridEnemyPawn::TryMoveToGridCoord()` 在目标格被敌人占据时调用近战友伤结算；同阵营不造成伤害，异阵营按目标格地块类型决定死亡结果。
 - 目标死亡且攻击者存活时，攻击者通过 `AGridManager::RequestMove()` 进入目标格；攻击者死亡时清空自身源格；双方死亡时清空双方占据。
-- `UCombatResolverComponent::ResolveEnemyRangedFriendlyFire()` 提供远程友伤结算入口；`AGridEnemyPawn::ApplyRangedFriendlyFireDamage()` 会对异阵营目标执行直接击杀和占位清理。
-- 友伤表现入口为 `AGridEnemyPawn::OnFriendlyFireResolved()`。当前已实现基础直接结算和远程敌人两阶段瞄准/开火；远程同窗口互击同步死亡调度、跨阵营清除链的队列化表现仍属于后续扩展。
+- `UCombatResolverComponent::ResolveEnemyRangedFriendlyFire()` 提供远程友伤判定；敌方回合中的 pending ranged 由 `AGridEnemyManager::ResolvePendingRangedAttacks()` 批量收集命中并统一应用死亡。
+- `AGridEnemyPawn::ApplyRangedFriendlyFireDamage()` 保留给蓝图或其他单发远程逻辑使用，会对异阵营目标执行直接击杀和占位清理。
+- 友伤表现入口为 `AGridEnemyPawn::OnFriendlyFireResolved()`。当前已实现基础直接结算、远程敌人两阶段瞄准/开火，以及远程同窗口互击同步死亡调度；跨阵营清除链的队列化表现仍属于后续扩展。
 
 ---
 
@@ -424,7 +426,8 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 
 - 当远程敌人与玩家处于同一 X 轴或 Y 轴，且中间无 `Obstacle` 时，进入 `AimingRangedAttack` 并显示锁定攻击线
 - 锁定攻击线从敌人相邻格开始，沿瞄准方向延伸到地图边界或 `Obstacle` 前一格
-- 下一次敌方回合开始时优先结算上一回合锁定的攻击线，结算后清除瞄准状态与攻击范围提示
+- 下一次敌方回合开始时优先批量结算上一回合锁定的攻击线，结算后清除瞄准状态与攻击范围提示
+- 同一结算窗口内的跨阵营远程互击会先收集命中结果，再统一应用死亡，因此双方同时死亡，不受敌人遍历顺序影响
 - 若玩家已经离开锁定攻击线，则不会受到伤害
 - 若无法瞄准玩家，远程敌人优先移动到能与玩家同 X/Y 轴且无遮挡的位置；没有可用目标时再回退到基础靠近逻辑
 
@@ -505,12 +508,14 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 ### 10.3 地图反馈
 
 - 地块转换必须有显著视觉切换
+- 玩家回到输入阶段时，应高亮下一步可移动到的空白相邻格；玩家动作和敌人回合解析期间应清空该提示，避免显示过期移动目标。
 - 属性变化应有即时数字或条形反馈
 - 远程敌人瞄准回合需要明确提示
 
 ### 10.4 可用性要求
 
 - 玩家必须能快速识别地块类型
+- 玩家必须能快速识别下一步可以移动到哪些格子
 - 玩家必须能区分当前属性成长方向
 - 玩家必须能识别敌人类型与压制状态
 
