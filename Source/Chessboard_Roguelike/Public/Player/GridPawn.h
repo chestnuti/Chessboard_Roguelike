@@ -12,6 +12,7 @@ class AGridEnemyManager;
 class AGridPickupManager;
 class UCombatResolverComponent;
 class UConversionEnergyComponent;
+class UMaterialParameterCollection;
 class UStaticMeshComponent;
 class USceneComponent;
 class UPlayerAttributeComponent;
@@ -57,6 +58,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grid")
 	bool bAutoInitializeOnBeginPlay = true;
 
+	// Optional material parameter collection used by grid materials to know the player's current logical tile.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grid|Material")
+	TObjectPtr<UMaterialParameterCollection> PlayerGridParameterCollection;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grid|Material")
+	FName PlayerGridXParameterName = TEXT("PlayerGridX");
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grid|Material")
+	FName PlayerGridYParameterName = TEXT("PlayerGridY");
+
 	// Visual interpolation time only; logical movement resolves immediately after RequestMove succeeds.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement")
 	float MoveDuration = 0.15f;
@@ -91,6 +102,12 @@ public:
 	// Convert area to selected type around play
 	UFUNCTION(BlueprintCallable, category = "Grid")
 	bool ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType EnergyType);
+
+	UFUNCTION(BlueprintCallable, Category = "Grid|Material")
+	void SyncPlayerGridMaterialParameters();
+
+	UFUNCTION(BlueprintCallable, Category = "Grid|Visual")
+	void RefreshPlayerNextMoveTiles();
 
 	// Visual-only movement; grid occupancy has already been updated before this starts.
 	void StartVisualMove(const FVector& From, const FVector& To);

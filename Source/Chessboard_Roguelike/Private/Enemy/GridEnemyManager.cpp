@@ -2,6 +2,7 @@
 
 #include "Core/TurnManager.h"
 #include "Core/TurnStateTypes.h"
+#include "Combat/CombatResolverComponent.h"
 #include "EngineUtils.h"
 #include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
@@ -11,6 +12,25 @@
 #include "Player/PlayerAttributeComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridEnemyManager, Log, All);
+
+namespace
+{
+	struct FQueuedRangedFriendlyFire
+	{
+		AGridEnemyPawn* Attacker = nullptr;
+		AGridEnemyPawn* Target = nullptr;
+		FEnemyFriendlyFireResolveResult ResolveResult;
+	};
+
+	struct FQueuedRangedAttack
+	{
+		AGridEnemyPawn* Attacker = nullptr;
+		TArray<FIntPoint> AttackTiles;
+		bool bHitPlayer = false;
+		FEnemyAttackResolveResult PlayerAttackResult;
+		TArray<FQueuedRangedFriendlyFire> FriendlyFireHits;
+	};
+}
 
 AGridEnemyManager::AGridEnemyManager()
 {
@@ -54,6 +74,10 @@ void AGridEnemyManager::Tick(float DeltaSeconds)
 	if (TurnManager && TurnManager->CurrentTurnState == ETurnState::EnemyTurnResolve)
 	{
 		TurnManager->EndEnemyTurn();
+		if (PlayerPawn && TurnManager->CanAcceptPlayerInput())
+		{
+			PlayerPawn->RefreshPlayerNextMoveTiles();
+		}
 	}
 }
 
@@ -298,7 +322,9 @@ int32 AGridEnemyManager::ResolvePendingRangedAttacks(TSet<AGridEnemyPawn*>& OutR
 		return 0;
 	}
 
-	int32 ResolvedCount = 0;
+	TArray<FQueuedRangedAttack> QueuedAttacks;
+	TArray<FQueuedRangedFriendlyFire> QueuedFriendlyFireHits;
+	TSet<AGridEnemyPawn*> EnemiesToKill;
 	const TArray<TObjectPtr<AGridEnemyPawn>> EnemiesThisTurn = RegisteredEnemies;
 	for (AGridEnemyPawn* Enemy : EnemiesThisTurn)
 	{
@@ -307,24 +333,111 @@ int32 AGridEnemyManager::ResolvePendingRangedAttacks(TSet<AGridEnemyPawn*>& OutR
 			continue;
 		}
 
-		const bool bResolvedAttack = Enemy->ResolvePendingRangedAttack(PlayerPawn);
 		OutResolvedAttackers.Add(Enemy);
-		if (bResolvedAttack)
+
+		if (Enemy->IsSuppressedByPlayer(PlayerPawn))
 		{
-			++ResolvedCount;
+			Enemy->OnSuppressedByPlayer(PlayerPawn);
+			Enemy->ClearRangedAimMode();
+			continue;
 		}
 
-		const UPlayerAttributeComponent* PlayerAttributes = PlayerPawn->PlayerAttributeComponent;
-		if (!PlayerAttributes)
-		{
-			PlayerAttributes = PlayerPawn->FindComponentByClass<UPlayerAttributeComponent>();
-		}
+		FQueuedRangedAttack& QueuedAttack = QueuedAttacks.AddDefaulted_GetRef();
+		QueuedAttack.Attacker = Enemy;
+		QueuedAttack.AttackTiles = Enemy->PendingRangedAttackTiles;
+		QueuedAttack.bHitPlayer = QueuedAttack.AttackTiles.Contains(PlayerPawn->CurrentGridCoord);
 
-		if (PlayerAttributes && PlayerAttributes->IsDefeated())
+		for (const FIntPoint& TileCoord : QueuedAttack.AttackTiles)
 		{
-			break;
+			if (!GridManager || TileCoord == Enemy->CurrentGridCoord || TileCoord == PlayerPawn->CurrentGridCoord)
+			{
+				continue;
+			}
+
+			FTileData TileData;
+			if (!GridManager->GetTileData(TileCoord, TileData) || TileData.OccupantType != EGridOccupantType::Enemy)
+			{
+				continue;
+			}
+
+			AGridEnemyPawn* TargetEnemy = Cast<AGridEnemyPawn>(TileData.OccupantActor.Get());
+			if (!IsValid(TargetEnemy) || TargetEnemy == Enemy)
+			{
+				continue;
+			}
+
+			const FEnemyFriendlyFireResolveResult FriendlyFireResult =
+				UCombatResolverComponent::ResolveEnemyRangedFriendlyFire(Enemy, TargetEnemy);
+			if (!FriendlyFireResult.bResolved
+				|| FriendlyFireResult.bSameFaction
+				|| !FriendlyFireResult.bTargetKilled)
+			{
+				continue;
+			}
+
+			FQueuedRangedFriendlyFire& FriendlyFireHit = QueuedAttack.FriendlyFireHits.AddDefaulted_GetRef();
+			FriendlyFireHit.Attacker = Enemy;
+			FriendlyFireHit.Target = TargetEnemy;
+			FriendlyFireHit.ResolveResult = FriendlyFireResult;
+			QueuedFriendlyFireHits.Add(FriendlyFireHit);
+			EnemiesToKill.Add(TargetEnemy);
 		}
 	}
 
-	return ResolvedCount;
+	for (FQueuedRangedAttack& QueuedAttack : QueuedAttacks)
+	{
+		if (!IsValid(QueuedAttack.Attacker))
+		{
+			continue;
+		}
+
+		if (QueuedAttack.bHitPlayer)
+		{
+			QueuedAttack.PlayerAttackResult = QueuedAttack.Attacker->ApplyRangedAttackDamage(PlayerPawn);
+		}
+	}
+
+	for (const FQueuedRangedFriendlyFire& FriendlyFireHit : QueuedFriendlyFireHits)
+	{
+		if (!IsValid(FriendlyFireHit.Attacker) || !IsValid(FriendlyFireHit.Target))
+		{
+			continue;
+		}
+
+		FriendlyFireHit.Attacker->OnFriendlyFireResolved(FriendlyFireHit.Target, FriendlyFireHit.ResolveResult);
+		FriendlyFireHit.Target->OnFriendlyFireResolved(FriendlyFireHit.Attacker, FriendlyFireHit.ResolveResult);
+	}
+
+	for (const FQueuedRangedAttack& QueuedAttack : QueuedAttacks)
+	{
+		if (!IsValid(QueuedAttack.Attacker))
+		{
+			continue;
+		}
+
+		QueuedAttack.Attacker->ClearRangedAimMode();
+		QueuedAttack.Attacker->OnRangedAttackResolved(
+			PlayerPawn,
+			QueuedAttack.AttackTiles,
+			QueuedAttack.PlayerAttackResult,
+			QueuedAttack.bHitPlayer);
+	}
+
+	for (AGridEnemyPawn* EnemyToKill : EnemiesToKill)
+	{
+		if (!IsValid(EnemyToKill) || !EnemyToKill->IsAlive())
+		{
+			continue;
+		}
+
+		AGridManager* EnemyGridManager = EnemyToKill->GridManager ? EnemyToKill->GridManager.Get() : GridManager.Get();
+		if (EnemyGridManager)
+		{
+			EnemyGridManager->ClearOccupant(EnemyToKill->CurrentGridCoord);
+		}
+
+		EnemyToKill->Kill();
+	}
+
+	return QueuedAttacks.Num();
 }

@@ -6,11 +6,14 @@
 #include "Components/StaticMeshComponent.h"
 #include "Core/TurnManager.h"
 #include "Core/TurnStateTypes.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Enemy/GridEnemyManager.h"
 #include "Enemy/GridEnemyPawn.h"
 #include "Grid/GridManager.h"
 #include "Grid/TileEffectResolverComponent.h"
+#include "Materials/MaterialParameterCollection.h"
+#include "Materials/MaterialParameterCollectionInstance.h"
 #include "Pickup/GridPickupManager.h"
 #include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
@@ -117,6 +120,7 @@ void AGridPawn::BeginPlay()
 	if (bInitializedOnGrid)
 	{
 		FoundTurnManager->SetTurnState(ETurnState::PlayerInput);
+		RefreshPlayerNextMoveTiles();
 	}
 }
 
@@ -199,6 +203,8 @@ void AGridPawn::InitializeOnGrid(AGridManager* InGridManager, ATurnManager* InTu
 
 	CurrentGridCoord = InStartCoord;
 	SetActorLocation(GridManager->GridToWorld(CurrentGridCoord));
+	SyncPlayerGridMaterialParameters();
+	RefreshPlayerNextMoveTiles();
 	bIsMoving = false;
 	bInitializedOnGrid = true;
 	SetActorTickEnabled(false);
@@ -262,15 +268,18 @@ void AGridPawn::TryMove(FIntPoint Direction)
 	const FVector ToLocation = GridManager->GridToWorld(TargetCoord);
 
 	TurnManager->BeginPlayerAction();
+	GridManager->ClearPlayerNextMoveTiles();
 
 	if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
 	{
 		// GridManager is authoritative; restore input if the final atomic move check fails.
 		TurnManager->EndPlayerAction();
+		RefreshPlayerNextMoveTiles();
 		return;
 	}
 
 	CurrentGridCoord = TargetCoord;
+	SyncPlayerGridMaterialParameters();
 	if (TileEffectResolverComponent)
 	{
 		// Tile effects are resolved only after RequestMove succeeds, so failed movement never changes attributes.
@@ -292,6 +301,7 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 	const FVector TargetLocation = GridManager->GridToWorld(TargetCoord);
 
 	TurnManager->BeginPlayerAction();
+	GridManager->ClearPlayerNextMoveTiles();
 
 	const FCombatResolveResult CombatResult = CombatResolverComponent
 		? CombatResolverComponent->ResolvePlayerMeleeAttack(this, EnemyActor)
@@ -309,10 +319,12 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 			UE_LOG(LogGridPawn, Warning, TEXT("ResolveEnemyMeleeAttack killed enemy but failed to move player into (%d,%d)."),
 				TargetCoord.X, TargetCoord.Y);
 			TurnManager->EndPlayerAction();
+			RefreshPlayerNextMoveTiles();
 			return;
 		}
 
 		CurrentGridCoord = TargetCoord;
+		SyncPlayerGridMaterialParameters();
 		if (TileEffectResolverComponent)
 		{
 			// A successful kill leaves the player occupying the target tile, so normal tile-enter effects apply.
@@ -420,6 +432,10 @@ void AGridPawn::ResolvePostPlayerActionTurn()
 	if (!EnemyManager)
 	{
 		TurnManager->EndPlayerAction();
+		if (TurnManager->CanAcceptPlayerInput())
+		{
+			RefreshPlayerNextMoveTiles();
+		}
 		return;
 	}
 
@@ -428,6 +444,10 @@ void AGridPawn::ResolvePostPlayerActionTurn()
 	if (!EnemyManager->ShouldDelayEnemyTurnEnd())
 	{
 		TurnManager->EndEnemyTurn();
+		if (TurnManager->CanAcceptPlayerInput())
+		{
+			RefreshPlayerNextMoveTiles();
+		}
 	}
 }
 
@@ -458,4 +478,72 @@ bool AGridPawn::ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType E
 		}
 	}
 	return bConvertedAny;
+}
+
+void AGridPawn::SyncPlayerGridMaterialParameters()
+{
+	if (!PlayerGridParameterCollection)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	UMaterialParameterCollectionInstance* CollectionInstance =
+		World->GetParameterCollectionInstance(PlayerGridParameterCollection);
+	if (!CollectionInstance)
+	{
+		UE_LOG(LogGridPawn, Warning, TEXT("SyncPlayerGridMaterialParameters failed: collection instance is unavailable."));
+		return;
+	}
+
+	CollectionInstance->SetScalarParameterValue(
+		PlayerGridXParameterName,
+		static_cast<float>(CurrentGridCoord.X));
+	CollectionInstance->SetScalarParameterValue(
+		PlayerGridYParameterName,
+		static_cast<float>(CurrentGridCoord.Y));
+}
+
+void AGridPawn::RefreshPlayerNextMoveTiles()
+{
+	if (!GridManager)
+	{
+		return;
+	}
+
+	static const FIntPoint NeighborOffsets[] =
+	{
+		FIntPoint(1, 0),
+		FIntPoint(-1, 0),
+		FIntPoint(0, 1),
+		FIntPoint(0, -1)
+	};
+
+	TArray<FIntPoint> MoveCoords;
+	MoveCoords.Reserve(UE_ARRAY_COUNT(NeighborOffsets));
+
+	for (const FIntPoint& Offset : NeighborOffsets)
+	{
+		const FIntPoint CandidateCoord = CurrentGridCoord + Offset;
+
+		FTileData TileData;
+		if (!GridManager->GetTileData(CandidateCoord, TileData))
+		{
+			continue;
+		}
+
+		if (TileData.bWalkable
+			&& TileData.TileType != ETileType::Obstacle
+			&& TileData.OccupantType == EGridOccupantType::Empty)
+		{
+			MoveCoords.Add(CandidateCoord);
+		}
+	}
+
+	GridManager->SetPlayerNextMoveTiles(MoveCoords);
 }

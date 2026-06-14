@@ -106,7 +106,7 @@ FocusTargetOffset = DeathWorldLocation - SpringArmWorldLocation
 - 玩家近战击杀敌人。
 - 敌人近战跨阵营友伤击杀目标。
 - 敌人近战跨阵营友伤导致攻击者死亡。
-- 远程敌人调用 `ApplyRangedFriendlyFireDamage()` 击杀目标。
+- 敌人管理器批量结算远程友伤并调用 `Kill()` 击杀目标；蓝图单发远程逻辑调用 `ApplyRangedFriendlyFireDamage()` 击杀目标时也会触发。
 - 后续新增陷阱、地块效果或清除链，只要最终调用 `Kill()`，也会自动触发。
 
 ## 调试点

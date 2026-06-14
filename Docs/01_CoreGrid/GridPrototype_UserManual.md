@@ -176,6 +176,8 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `ClearOccupant(Coord)`: 清空某格占据。
 - `RequestMove(Unit, FromCoord, ToCoord)`: 原子移动请求。
 - `GetTileInstanceIndex(Coord, OutInstanceIndex)`: 获取坐标对应的 ISM 实例下标。
+- `ClearPlayerNextMoveTiles()`: 清空材质中的玩家下一步可移动格标记。
+- `SetPlayerNextMoveTiles(MoveCoords)`: 将指定坐标写为玩家下一步可移动格，材质通过 `PerInstanceCustomData[3]` 读取。
 - `RefreshTileInstanceVisual(Coord, NewTileType)`: 蓝图可重写的视觉刷新钩子。
 
 `ApplyTileLayout()` 使用约定：
@@ -289,8 +291,12 @@ L-System 符号：
 视觉说明：
 
 - `TileISM->PerInstanceCustomData[0]` 存储地块类型数值。
+- `TileISM->PerInstanceCustomData[1]` 存储格子逻辑坐标 `GridCoord.X`。
+- `TileISM->PerInstanceCustomData[2]` 存储格子逻辑坐标 `GridCoord.Y`。
+- `TileISM->PerInstanceCustomData[3]` 存储该格是否为玩家下一步可移动目标，`1.0` 表示可移动，`0.0` 表示不可移动。
 - 当前映射：`Minimal=0`、`Construct=1`、`Acid=2`、`Obstacle=3`。
-- 材质可以读取该值决定颜色或图案。
+- 材质可以读取地块类型决定颜色或图案，读取 X/Y 坐标做棋盘奇偶、区域遮罩、坐标驱动动画，也可以读取 `[3]` 做可移动格高亮。
+- 如果坐标数据要接入 Base Color、Emissive、Opacity 等像素阶段输入，建议先通过 `VertexInterpolator` 从顶点阶段传递到像素阶段。
 
 ## Pawn 移动接口
 
@@ -315,6 +321,8 @@ L-System 符号：
 
 - `InitializeOnGrid(InGridManager, InTurnManager, InStartCoord)`: 初始化到指定格子并占据起点。
 - `TryMove(Direction)`: 请求四方向单格移动。
+- `SyncPlayerGridMaterialParameters()`: 将当前玩家逻辑坐标写入配置的 Material Parameter Collection。
+- `RefreshPlayerNextMoveTiles()`: 根据当前坐标和棋盘占据状态刷新 `PerInstanceCustomData[3]` 的可移动格标记。
 - `StartVisualMove(From, To)`: 开始视觉插值。
 - `FinishVisualMove()`: 结束视觉插值并精确对齐目标格中心。
 
@@ -600,7 +608,7 @@ void AGridPlayerController::MoveRight()
 自定义地块视觉：
 
 1. 在 `BP_GridManager` 重写 `RefreshTileInstanceVisual(Coord, NewTileType)`。
-2. 或在棋盘材质中读取 `PerInstanceCustomData[0]`。
+2. 或在棋盘材质中读取 `PerInstanceCustomData[0]` 获取地块类型，读取 `PerInstanceCustomData[1]` / `[2]` 获取格子 X/Y 坐标，读取 `PerInstanceCustomData[3]` 获取玩家下一步可移动标记。
 3. 使用 `GetTileInstanceIndex()` 找到单个格子的 ISM 实例下标。
 
 ## 调试建议

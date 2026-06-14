@@ -116,15 +116,16 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 
 当 `AGridEnemyPawn::BehaviorType == EEnemyBehaviorType::Ranged` 时，默认 C++ AI 会使用两阶段远程攻击：
 
-1. 如果敌人已经处于 `AimingRangedAttack`，`AGridEnemyManager::ExecuteEnemyTurn()` 会在普通敌人行动前先调用 `ResolvePendingRangedAttack()`。
+1. 如果存在敌人已经处于 `AimingRangedAttack`，`AGridEnemyManager::ExecuteEnemyTurn()` 会在普通敌人行动前先调用 `ResolvePendingRangedAttacks()` 批量处理本窗口内所有待结算远程攻击。
 2. 远程攻击结算后，该敌人会被记录为本回合已行动，不会在同一轮敌方回合里再次移动或重新瞄准。
 3. 如果敌人尚未瞄准，`ExecuteBasicTurn()` 会先检查敌人与玩家是否同 X 或同 Y，且从敌人到玩家之间没有 `Obstacle`。
 4. 满足条件时，敌人进入 `AimingRangedAttack`，缓存 `PendingRangedAttackTiles` 和 `PendingRangedAttackDirection`，并通过 `URangedAttackTelegraphComponent` 显示攻击线。
 5. 攻击线从敌人相邻格开始，沿瞄准方向延伸，遇到无效坐标或 `Obstacle` 停止；`Obstacle` 格本身不会被包含在攻击范围里。
 6. 下一次敌方回合开始时，攻击按上一回合锁定的 `PendingRangedAttackTiles` 结算。玩家如果已经离开该线，则不会被命中。
-7. 如果攻击线中包含其他敌人，远程敌人会对这些目标调用 `ApplyRangedFriendlyFireDamage()`，复用跨阵营远程友伤规则。
-8. 如果远程敌人在开火回合被玩家属性压制，会取消待结算攻击线并清除提示。
-9. 如果远程敌人不能瞄准玩家，它会优先选择能在一步后与玩家同 X 或同 Y 且无障碍视线的邻格；没有这样的邻格时，再选择更接近对齐的邻格，最后才回退到 A* 靠近玩家。
+7. 如果攻击线中包含其他敌人，敌人管理器会先收集本窗口内所有跨阵营远程友伤命中，再统一清空占据并调用 `Kill()`。
+8. 如果两个不同阵营远程敌人在同一结算窗口内互相命中，双方都会在统一应用阶段死亡，不受遍历顺序影响。
+9. 如果远程敌人在开火回合被玩家属性压制，会取消待结算攻击线并清除提示。
+10. 如果远程敌人不能瞄准玩家，它会优先选择能在一步后与玩家同 X 或同 Y 且无障碍视线的邻格；没有这样的邻格时，再选择更接近对齐的邻格，最后才回退到 A* 靠近玩家。
 
 `URangedAttackTelegraphComponent` 是纯表现组件，不修改 `AGridManager::Tiles`、`ETileType` 或占据状态。默认情况下它会复用 `GridSettings->TileMesh` 来生成 `InstancedStaticMesh` 提示；可在蓝图子类中设置 `TelegraphTileMesh`、`TelegraphMaterial`、`ZOffset` 和 `ScaleMultiplier` 调整表现。
 
@@ -156,7 +157,7 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 - 成功移动后，敌人 Actor 会从旧格中心插值到新格中心，默认时长为 `MoveDuration = 0.15`。
 - 移动插值期间，敌人管理器延迟调用 `ATurnManager::EndEnemyTurn()`，防止玩家在敌人视觉移动未完成时输入。
 - `BehaviorType == Ranged` 的敌人会优先尝试进入远程瞄准模式；无法瞄准时优先移动到能与玩家同 X/Y 轴并取得无障碍视线的位置，而不是直接靠近玩家。
-- 远程敌人进入瞄准模式后会显示锁定攻击线，并在下一次敌方回合开始时优先结算该攻击线。
+- 远程敌人进入瞄准模式后会显示锁定攻击线，并在下一次敌方回合开始时由敌人管理器优先批量结算所有待结算攻击线。
 
 ## 边界与后续扩展
 
@@ -169,7 +170,8 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 - 敌人攻击未击败玩家时退回原格，击败玩家时占据玩家格。
 - 敌人近战可按阵营扣减玩家构成值或酸性值。
 - 敌人移动撞上异阵营敌人时，会按目标格地块类型结算近战友伤。
-- 远程敌人可通过 `ApplyRangedFriendlyFireDamage()` 复用跨阵营远程友伤结算。
+- 敌方回合中的远程友伤会先收集所有命中再统一应用死亡，支持不同阵营远程敌人在同一结算窗口内互击同步死亡。
+- 蓝图或其他单发远程逻辑可通过 `ApplyRangedFriendlyFireDamage()` 复用跨阵营远程友伤结算。
 - 远程敌人会在同 X/Y 且无遮挡时进入瞄准模式，并通过 `URangedAttackTelegraphComponent` 显示从敌人出发到 Obstacle 前停止的直线攻击范围。
 - 敌方回合开始时会先结算所有待结算远程攻击；已开火的远程敌人本回合不会再执行普通行动。
 - 友伤结果可通过 `OnFriendlyFireResolved()` 给蓝图表现层使用。
@@ -180,7 +182,6 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 
 - 敌人逐个行动动画队列；当前移动插值是并行播放。
 - 房间激活和跨房间追逐。
-- 远程敌人同一结算窗口内的互击同步死亡调度。
 - 跨阵营清除链的专用队列、连锁表现和 UI 提示。
 
 推荐后续扩展：

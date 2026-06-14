@@ -13,7 +13,7 @@
 5. Resolver 读取目标格 `FTileData.TileType`。
 6. 如果是 `Construct` 或 `Acid`，Resolver 修改玩家 `UPlayerAttributeComponent`。
 7. 如果该格 `bConvertible == true`，Resolver 调用 `AGridManager::SetTileType()` 把该格转为配置的消耗结果，默认是 `Minimal`。
-8. `SetTileType()` 更新 `PerInstanceCustomData[0]`，调用 `RefreshTileInstanceVisual()`，并广播 `OnTileTypeChanged`。
+8. `SetTileType()` 更新 `PerInstanceCustomData[0]` 的地块类型值，并保持 `[1]` / `[2]` 的格子坐标值和 `[3]` 的玩家下一步可移动标记，调用 `RefreshTileInstanceVisual()`，并广播 `OnTileTypeChanged`。
 9. HUD 监听 `OnPlayerAttributeChanged`，刷新属性文本和进度条。
 
 非法移动、撞墙、目标格被占据、移动到 `Obstacle` 都不会触发属性变化，也不会消耗地块。
@@ -35,6 +35,8 @@
 
 - 枚举值显式固定，避免已有资产序列化后顺序变化。
 - `PerInstanceCustomData[0]` 使用同一套数值映射，用于地块材质区分视觉。
+- `PerInstanceCustomData[1]` / `[2]` 分别存储 `GridCoord.X` / `GridCoord.Y`，用于材质按逻辑坐标生成棋盘奇偶、遮罩或坐标动画。
+- `PerInstanceCustomData[3]` 存储 `bPlayerCanMoveNext`，用于材质高亮玩家下一步可移动到的空格。
 
 ## 地块数据
 
@@ -261,6 +263,8 @@ PlayerAttributeComponent
 | `SetTileType` | `Coord`, `NewTileType` | `bool` | 只修改地块类型，不修改占据状态 |
 | `RefreshTileInstanceVisual` | `Coord`, `NewTileType` | 无 | 蓝图可重写的单格视觉刷新钩子 |
 | `GetTileInstanceIndex` | `Coord`, `OutInstanceIndex` | `bool` | 获取坐标对应的 ISM 实例下标 |
+| `ClearPlayerNextMoveTiles` | 无 | 无 | 清空材质中的玩家下一步可移动格标记 |
+| `SetPlayerNextMoveTiles` | `MoveCoords` | 无 | 批量写入玩家下一步可移动格，材质通过 `PerInstanceCustomData[3]` 读取 |
 | `IsTileConvertible` | `Coord` | `bool` | 是否允许被地块效果转换 |
 | `GridToWorld` | `Coord` | `FVector` | 逻辑坐标转世界坐标 |
 | `WorldToGrid` | `WorldLocation` | `FIntPoint` | 世界坐标转逻辑坐标 |
@@ -289,7 +293,7 @@ PlayerAttributeComponent
 
 注意：
 
-- `SetTileType()` 已经会在 C++ 中写入 `PerInstanceCustomData[0]`。
+- `SetTileType()` 已经会在 C++ 中写入 `PerInstanceCustomData[0]` 的地块类型值；坐标通道 `[1]` / `[2]` 和下一步可移动通道 `[3]` 在地块生成和刷新实例数据时同步写入。
 - 如果蓝图重写 `RefreshTileInstanceVisual()`，需要调用 `Call Parent Function`，否则只会执行蓝图里的额外逻辑。
 - 不需要在 `OnTileTypeChanged` 中再次调用 `RefreshTileInstanceVisual()`；保留也可以，但不是必须。
 
@@ -301,13 +305,17 @@ PlayerAttributeComponent
 
 ```text
 PerInstanceCustomData[0]
+PerInstanceCustomData[1]
+PerInstanceCustomData[2]
+PerInstanceCustomData[3]
 ```
 
 代码写入位置：
 
-- `GenerateGrid()`：创建地块时写入初始值。
-- `SetTileType()`：地块类型变化时写入新值。
+- `GenerateGrid()` / `ApplyTileLayout()`：创建地块时写入初始地块类型、格子坐标和默认不可移动标记。
+- `SetTileType()`：地块类型变化时写入新类型值，并保留该实例的格子坐标和当前可移动标记。
 - `ApplyTileInstanceCustomData()`：实际执行 `SetCustomDataValue()`。
+- `AGridPawn::RefreshPlayerNextMoveTiles()`：计算玩家四方向空白可走格，并通过 `AGridManager::SetPlayerNextMoveTiles()` 写入 `PerInstanceCustomData[3]`。
 
 材质数值映射：
 
@@ -323,10 +331,10 @@ PerInstanceCustomData[0]
 1. 打开 `DA_GridSettings_Prototype`。
 2. 找到 `TileMesh`。
 3. 打开该 Static Mesh 资源。
-4. 在 Static Mesh 的 `Material Slots` 中，把 `Element 0` 设置为读取 `PerInstanceCustomData[0]` 的主材质或材质实例。
-5. 在材质中根据 `PerInstanceCustomData[0]` 选择颜色、贴图或效果。
+4. 在 Static Mesh 的 `Material Slots` 中，把 `Element 0` 设置为读取 `PerInstanceCustomData[0..3]` 的主材质或材质实例。
+5. 在材质中根据 `PerInstanceCustomData[0]` 选择颜色、贴图或效果；根据 `PerInstanceCustomData[1]` / `[2]` 读取格子 X/Y 坐标；根据 `PerInstanceCustomData[3]` 做玩家下一步可移动格高亮。
 
-如果 `PerInstanceCustomData[0]` 用于 `Base Color`、`Emissive Color` 等像素阶段输入，通常需要通过 `VertexInterpolator` 把值从顶点阶段传到像素阶段。
+如果 `PerInstanceCustomData` 用于 `Base Color`、`Emissive Color` 等像素阶段输入，通常需要通过 `VertexInterpolator` 把值从顶点阶段传到像素阶段。
 
 ### 蓝图获取格子 InstanceIndex
 
@@ -349,7 +357,9 @@ Custom Data Value = 0/1/2/3
 Mark Render State Dirty = true
 ```
 
-正常情况下不需要手动设置；C++ 已经在地块生成和地块类型变化时自动写入。
+如果手动写玩家下一步可移动提示，则使用 `Custom Data Index = 3`，`Custom Data Value = 1` 表示可移动，`0` 表示不可移动。
+
+正常情况下不需要手动设置；C++ 已经在地块生成、地块类型变化和玩家可移动格刷新时自动写入。只有在蓝图中手动改写实例数据时，才需要保持约定：`0=TileType`、`1=GridCoord.X`、`2=GridCoord.Y`、`3=bPlayerCanMoveNext`。
 
 ## 属性 HUD
 
@@ -402,9 +412,9 @@ HUD 行为：
 
 1. Output Log 是否有 `ApplyTileInstanceCustomData failed`。
 2. `TileInstanceIndices.Num()` 是否等于 `Tiles.Num()`。
-3. `TileISM.NumCustomDataFloats` 是否至少为 `1`。
+3. `TileISM.NumCustomDataFloats` 是否至少为 `4`。
 4. 材质是否真的挂在 `TileMesh` 的 `Element 0`。
-5. 材质是否读取 `PerInstanceCustomData[0]`。
+5. 材质是否读取 `PerInstanceCustomData[0]`；如果需要坐标驱动表现，是否读取 `[1]` / `[2]`；如果需要可移动格高亮，是否读取 `[3]`。
 6. 如果用于像素阶段，是否经过 `VertexInterpolator`。
 7. 蓝图是否重写了 `RefreshTileInstanceVisual()` 且没有 `Call Parent Function`。
 
