@@ -296,6 +296,7 @@ L-System 符号：
 - `TileISM->PerInstanceCustomData[3]` 存储该格是否为玩家下一步可移动目标，`1.0` 表示可移动，`0.0` 表示不可移动。
 - 当前映射：`Minimal=0`、`Construct=1`、`Acid=2`、`Obstacle=3`。
 - 材质可以读取地块类型决定颜色或图案，读取 X/Y 坐标做棋盘奇偶、区域遮罩、坐标驱动动画，也可以读取 `[3]` 做可移动格高亮。
+- 变身目标选择阶段，`AGridPlayerController` 会把鼠标指向的合法目标格写入 `MPC_PlayerPosition`：`MouseHoverGridX`、`MouseHoverGridY`、`bHasMouseHoverGrid`。材质可用这些参数和 `[1]` / `[2]` 比较，得到当前实例是否为鼠标悬停目标格。
 - 如果坐标数据要接入 Base Color、Emissive、Opacity 等像素阶段输入，建议先通过 `VertexInterpolator` 从顶点阶段传递到像素阶段。
 
 ## Pawn 移动接口

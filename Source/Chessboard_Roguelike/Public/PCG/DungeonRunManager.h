@@ -41,7 +41,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
 	EDungeonRunGenerationMode GenerationMode = EDungeonRunGenerationMode::Procedural;
 
-	// Optional. When unset, TutorialFixed mode uses the built-in four tutorial definitions.
+	// Optional. When unset, TutorialFixed mode uses the built-in tutorial definitions.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tutorial|Dungeon")
 	TObjectPtr<UTutorialLevelSet> TutorialLevelSet;
 
@@ -95,6 +95,7 @@ private:
 	bool ApplyTutorialLevel(const FTutorialLevelDefinition& TutorialLevel);
 	bool InitializePlayerAtCoord(FIntPoint StartCoord);
 	void SpawnTutorialEnemies(const FTutorialLevelDefinition& TutorialLevel);
+	void SpawnTutorialPickups(const FTutorialLevelDefinition& TutorialLevel);
 	bool ApplyGeneratedLayout();
 	bool InitializePlayerFromLayout();
 	void SpawnEnemiesFromLayout();

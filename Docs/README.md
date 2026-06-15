@@ -11,6 +11,7 @@
 | 战斗与敌人 | [03_CombatAndEnemies](03_CombatAndEnemies/README.md) | 近战攻击、敌人属性、免疫与阈值击杀、敌人管理器、敌方行动调度 |
 | 项目规划 | [04_ProjectPlanning](04_ProjectPlanning/README.md) | GDD、技术实现需求、开发任务清单、阶段划分、里程碑 |
 | 教学关卡 | [05_TutorialLevels](05_TutorialLevels/README.md) | 固定 10x10 教学地图、教学 DataAsset、5 张 Map 资产和验证脚本 |
+| 变身棋子系统 | [06_TransformSystem](06_TransformSystem/README.md) | 变身棋子背包、4 槽轮盘、鼠标选格移动、边缘滚屏、一次性变身消耗规则 |
 
 ## 推荐阅读路径
 

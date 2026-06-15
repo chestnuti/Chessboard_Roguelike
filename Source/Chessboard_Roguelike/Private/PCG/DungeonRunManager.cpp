@@ -194,6 +194,7 @@ bool ADungeonRunManager::GenerateTutorialRun()
 	}
 
 	SpawnTutorialEnemies(TutorialLevel);
+	SpawnTutorialPickups(TutorialLevel);
 	return true;
 }
 
@@ -294,6 +295,74 @@ void ADungeonRunManager::SpawnTutorialEnemies(const FTutorialLevelDefinition& Tu
 		Enemy->FinishSpawning(SpawnTransform);
 		Enemy->InitializeOnGrid(GridManager, EnemyData.Coord);
 		RegisterEnemyWithManager(Enemy);
+	}
+}
+
+void ADungeonRunManager::SpawnTutorialPickups(const FTutorialLevelDefinition& TutorialLevel)
+{
+	if (TutorialLevel.Pickups.IsEmpty())
+	{
+		return;
+	}
+
+	if (!GridManager || !GetWorld())
+	{
+		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnTutorialPickups skipped: GridManager or World is missing."));
+		return;
+	}
+
+	AGridPickupManager* ResolvedPickupManager = EnsurePickupManager();
+	if (!ResolvedPickupManager)
+	{
+		UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnTutorialPickups skipped: PickupManager is missing and could not be spawned."));
+		return;
+	}
+
+	ResolvedPickupManager->ClearAllPickups();
+
+	for (const FTutorialPickupSpawnData& PickupData : TutorialLevel.Pickups)
+	{
+		if (!PickupData.PickupClass)
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnTutorialPickups skipped %s pickup at (%d,%d): PickupClass is missing."),
+				*TutorialLevel.LevelId.ToString(), PickupData.Coord.X, PickupData.Coord.Y);
+			continue;
+		}
+
+		if (!GridManager->IsWalkable(PickupData.Coord) || GridManager->IsOccupied(PickupData.Coord))
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnTutorialPickups skipped %s pickup at (%d,%d): tile is blocked or occupied."),
+				*TutorialLevel.LevelId.ToString(), PickupData.Coord.X, PickupData.Coord.Y);
+			continue;
+		}
+
+		if (ResolvedPickupManager->GetPickupAt(PickupData.Coord))
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnTutorialPickups skipped %s pickup at (%d,%d): coord already has a pickup."),
+				*TutorialLevel.LevelId.ToString(), PickupData.Coord.X, PickupData.Coord.Y);
+			continue;
+		}
+
+		const FTransform SpawnTransform(FRotator::ZeroRotator, GridManager->GridToWorld(PickupData.Coord));
+		AGridPickupActor* Pickup = GetWorld()->SpawnActorDeferred<AGridPickupActor>(
+			PickupData.PickupClass,
+			SpawnTransform,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!Pickup)
+		{
+			UE_LOG(LogDungeonRunManager, Warning, TEXT("SpawnTutorialPickups failed at (%d,%d)."),
+				PickupData.Coord.X, PickupData.Coord.Y);
+			continue;
+		}
+
+		Pickup->FinishSpawning(SpawnTransform);
+		Pickup->InitializeOnGrid(GridManager, PickupData.Coord);
+		if (!ResolvedPickupManager->RegisterPickup(Pickup))
+		{
+			Pickup->Destroy();
+		}
 	}
 }
 

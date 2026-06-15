@@ -7,6 +7,7 @@
 #include "TutorialLevelSet.generated.h"
 
 class AGridEnemyPawn;
+class AGridPickupActor;
 
 USTRUCT(BlueprintType)
 struct CHESSBOARD_ROGUELIKE_API FTutorialEnemySpawnData
@@ -30,6 +31,18 @@ struct CHESSBOARD_ROGUELIKE_API FTutorialEnemySpawnData
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial|Enemy", meta = (ClampMin = "0"))
 	int32 MaxRangedAttackDistance = 0;
+};
+
+USTRUCT(BlueprintType)
+struct CHESSBOARD_ROGUELIKE_API FTutorialPickupSpawnData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial|Pickup")
+	FIntPoint Coord = FIntPoint::ZeroValue;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial|Pickup")
+	TSubclassOf<AGridPickupActor> PickupClass;
 };
 
 USTRUCT(BlueprintType)
@@ -57,6 +70,9 @@ struct CHESSBOARD_ROGUELIKE_API FTutorialLevelDefinition
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial|Level")
 	TArray<FTutorialEnemySpawnData> Enemies;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial|Level")
+	TArray<FTutorialPickupSpawnData> Pickups;
 };
 
 UCLASS(BlueprintType)

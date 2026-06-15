@@ -4,6 +4,8 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Grid/GridManager.h"
+#include "Grid/GridSettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCombatCameraDirector, Log, All);
 
@@ -179,6 +181,67 @@ void UCombatCameraDirectorComponent::EndConversionEnergyZoom()
 	bConversionEnergyZoomReturning = true;
 
 	SetComponentTickEnabled(true);
+}
+
+void UCombatCameraDirectorComponent::PanCameraByScreenDirection(
+	FVector2D ScreenDirection,
+	float Distance,
+	AGridManager* GridManager,
+	float GridPaddingTiles)
+{
+	if (ScreenDirection.IsNearlyZero() || Distance <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	USpringArmComponent* SpringArm = FindSpringArm();
+	if (!SpringArm)
+	{
+		return;
+	}
+
+	ScreenDirection.Normalize();
+	FVector Right = SpringArm->GetRightVector();
+	FVector Forward = SpringArm->GetForwardVector();
+	Right.Z = 0.f;
+	Forward.Z = 0.f;
+
+	if (!Right.Normalize() || !Forward.Normalize())
+	{
+		return;
+	}
+
+	const FVector WorldDelta = (Right * ScreenDirection.X + Forward * ScreenDirection.Y).GetSafeNormal() * Distance;
+	const FVector DesiredTargetOffset = SpringArm->TargetOffset + WorldDelta;
+	SpringArm->TargetOffset = ClampTargetOffsetToGridBounds(SpringArm, DesiredTargetOffset, GridManager, GridPaddingTiles);
+}
+
+void UCombatCameraDirectorComponent::BeginTransformTargetingCameraSession()
+{
+	USpringArmComponent* SpringArm = FindSpringArm();
+	if (!SpringArm)
+	{
+		return;
+	}
+
+	TransformTargetingRestTargetOffset = SpringArm->TargetOffset;
+	bHasTransformTargetingRestTargetOffset = true;
+}
+
+void UCombatCameraDirectorComponent::RestoreTransformTargetingCameraSession()
+{
+	USpringArmComponent* SpringArm = FindSpringArm();
+	if (!SpringArm)
+	{
+		bHasTransformTargetingRestTargetOffset = false;
+		return;
+	}
+
+	SpringArm->TargetOffset = bHasTransformTargetingRestTargetOffset
+		? TransformTargetingRestTargetOffset
+		: FVector::ZeroVector;
+
+	bHasTransformTargetingRestTargetOffset = false;
 }
 
 USpringArmComponent* UCombatCameraDirectorComponent::FindSpringArm()
@@ -363,4 +426,34 @@ void UCombatCameraDirectorComponent::ResetConversionEnergyZoomState()
 		ActiveSpringArm.Reset();
 		SetComponentTickEnabled(false);
 	}
+}
+
+FVector UCombatCameraDirectorComponent::ClampTargetOffsetToGridBounds(
+	const USpringArmComponent* SpringArm,
+	const FVector& DesiredTargetOffset,
+	const AGridManager* GridManager,
+	float GridPaddingTiles) const
+{
+	if (!SpringArm || !GridManager || !GridManager->GridSettings || GridManager->CurrentWidth <= 0 || GridManager->CurrentHeight <= 0)
+	{
+		return DesiredTargetOffset;
+	}
+
+	const float TileSize = GridManager->GridSettings->TileSize;
+	if (TileSize <= KINDA_SMALL_NUMBER)
+	{
+		return DesiredTargetOffset;
+	}
+
+	const float Padding = FMath::Max(0.f, GridPaddingTiles) * TileSize;
+	const FVector MinWorld = GridManager->GridToWorld(FIntPoint(0, 0)) - FVector(Padding, Padding, 0.f);
+	const FVector MaxWorld = GridManager->GridToWorld(FIntPoint(GridManager->CurrentWidth - 1, GridManager->CurrentHeight - 1)) + FVector(Padding, Padding, 0.f);
+
+	FVector DesiredFocusWorld = SpringArm->GetComponentLocation() + DesiredTargetOffset;
+	DesiredFocusWorld.X = FMath::Clamp(DesiredFocusWorld.X, FMath::Min(MinWorld.X, MaxWorld.X), FMath::Max(MinWorld.X, MaxWorld.X));
+	DesiredFocusWorld.Y = FMath::Clamp(DesiredFocusWorld.Y, FMath::Min(MinWorld.Y, MaxWorld.Y), FMath::Max(MinWorld.Y, MaxWorld.Y));
+
+	FVector ClampedTargetOffset = DesiredFocusWorld - SpringArm->GetComponentLocation();
+	ClampedTargetOffset.Z = DesiredTargetOffset.Z;
+	return ClampedTargetOffset;
 }

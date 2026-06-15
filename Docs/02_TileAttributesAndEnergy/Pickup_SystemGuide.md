@@ -183,3 +183,24 @@ AGridPickupActor
 ### 道具挡住玩家移动
 
 拾取物不应调用 `GridManager->TryOccupyTile()`，也不应写入 `FTileData.OccupantType`。如果玩家被阻挡，优先检查该格是否被敌人、障碍或其他占据 Actor 占用。
+
+## 变身棋子拾取物
+
+变身棋子拾取物使用 `AGridTransformPiecePickupActor`，继承自 `AGridPickupActor`。它不立即改变玩家移动规则，而是把棋子数量加入玩家的 `UPlayerTransformInventoryComponent`。
+
+主要字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `TransformType` | `EChessTransformType` | 拾取后加入背包的棋子类型，例如 Knight、Bishop、Rook、Queen。 |
+| `Amount` | `int32` | 本次拾取增加的堆叠数量，默认 1。 |
+
+接入流程：
+
+1. 创建 `AGridTransformPiecePickupActor` 的蓝图派生类。
+2. 设置 `TransformType` 和 `Amount`。
+3. 配置拾取物 Mesh、材质、音效或 `OnCollected` 表现。
+4. 在 `DungeonGenerationSettings.PickupSpawnPool` 中加入该拾取物蓝图。
+5. 玩家进入道具格后，道具调用 `TransformInventoryComponent->AddTransformPiece()`，成功后按普通拾取物规则销毁。
+
+完整变身轮盘、鼠标选格和边缘滚屏说明见 [变身棋子系统](../06_TransformSystem/Transform_SystemGuide.md)。

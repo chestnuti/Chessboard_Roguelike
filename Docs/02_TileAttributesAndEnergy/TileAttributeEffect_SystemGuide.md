@@ -310,12 +310,21 @@ PerInstanceCustomData[2]
 PerInstanceCustomData[3]
 ```
 
+如果材质需要显示鼠标当前指向的变身目标格，还需要读取 `MPC_PlayerPosition` 中的 Scalar 参数：
+
+```text
+MouseHoverGridX
+MouseHoverGridY
+bHasMouseHoverGrid
+```
+
 代码写入位置：
 
 - `GenerateGrid()` / `ApplyTileLayout()`：创建地块时写入初始地块类型、格子坐标和默认不可移动标记。
 - `SetTileType()`：地块类型变化时写入新类型值，并保留该实例的格子坐标和当前可移动标记。
 - `ApplyTileInstanceCustomData()`：实际执行 `SetCustomDataValue()`。
 - `AGridPawn::RefreshPlayerNextMoveTiles()`：计算玩家四方向空白可走格，并通过 `AGridManager::SetPlayerNextMoveTiles()` 写入 `PerInstanceCustomData[3]`。
+- `AGridPlayerController::UpdateMouseHoverGridMaterialParameters()`：在变身选点阶段把鼠标指向的合法目标格写入 MPC；取消、完成移动、拖动相机或无合法悬停时写入 `bHasMouseHoverGrid = 0`。
 
 材质数值映射：
 
@@ -333,6 +342,7 @@ PerInstanceCustomData[3]
 3. 打开该 Static Mesh 资源。
 4. 在 Static Mesh 的 `Material Slots` 中，把 `Element 0` 设置为读取 `PerInstanceCustomData[0..3]` 的主材质或材质实例。
 5. 在材质中根据 `PerInstanceCustomData[0]` 选择颜色、贴图或效果；根据 `PerInstanceCustomData[1]` / `[2]` 读取格子 X/Y 坐标；根据 `PerInstanceCustomData[3]` 做玩家下一步可移动格高亮。
+6. 变身选点悬停高亮：用 `PerInstanceCustomData[1] == MouseHoverGridX` 且 `PerInstanceCustomData[2] == MouseHoverGridY` 且 `bHasMouseHoverGrid > 0` 判断当前实例是否为鼠标指向格；如只允许合法目标格显示悬停，再乘以 `PerInstanceCustomData[3]`。
 
 如果 `PerInstanceCustomData` 用于 `Base Color`、`Emissive Color` 等像素阶段输入，通常需要通过 `VertexInterpolator` 把值从顶点阶段传到像素阶段。
 

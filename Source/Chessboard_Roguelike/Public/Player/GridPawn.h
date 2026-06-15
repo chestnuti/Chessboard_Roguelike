@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "Grid/GridTypes.h"
+#include "Transform/ChessTransformTypes.h"
 #include "GridPawn.generated.h"
 
 class AGridManager;
@@ -10,13 +11,18 @@ class ATurnManager;
 class AGridEnemyPawn;
 class AGridEnemyManager;
 class AGridPickupManager;
+class UChessPieceFormData;
 class UCombatResolverComponent;
 class UConversionEnergyComponent;
+class UMaterialInterface;
 class UMaterialParameterCollection;
 class UStaticMeshComponent;
 class USceneComponent;
 class UPlayerAttributeComponent;
+class UPlayerTransformInventoryComponent;
 class UTileEffectResolverComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTransformVisualStateChanged, UChessPieceFormData*, FormData, bool, bIsTransformed);
 
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API AGridPawn : public APawn
@@ -48,6 +54,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UConversionEnergyComponent> ConversionEnergyComponent;
 
+	// Stores consumable chess-piece forms used by the transform wheel.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UPlayerTransformInventoryComponent> TransformInventoryComponent;
+
 	// Authoritative logical position for movement and validation.
 	UPROPERTY(BlueprintReadOnly, Category = "Grid")
 	FIntPoint CurrentGridCoord = FIntPoint::ZeroValue;
@@ -76,6 +86,15 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Movement")
 	bool bIsMoving = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Transform|Visual")
+	bool bIsTransformVisualActive = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform|Visual")
+	TObjectPtr<UChessPieceFormData> ActiveTransformVisualForm;
+
+	UPROPERTY(BlueprintAssignable, Category = "Transform|Visual")
+	FOnTransformVisualStateChanged OnTransformVisualStateChanged;
+
 	UPROPERTY()
 	TObjectPtr<AGridManager> GridManager;
 
@@ -94,6 +113,24 @@ public:
 	// Direction must be exactly one cardinal grid step.
 	UFUNCTION(BlueprintCallable, Category = "Movement")
 	void TryMove(FIntPoint Direction);
+
+	UFUNCTION(BlueprintCallable, Category = "Transform")
+	bool TryTransformMoveToCoord(FIntPoint TargetCoord, UChessPieceFormData* FormData);
+
+	UFUNCTION(BlueprintCallable, Category = "Transform")
+	TArray<FTransformMoveTarget> BuildLegalTransformTargets(UChessPieceFormData* FormData) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Transform|Visual")
+	void ApplyTransformVisual(UChessPieceFormData* FormData);
+
+	UFUNCTION(BlueprintCallable, Category = "Transform|Visual")
+	void RestoreDefaultPawnVisual();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Transform|Visual")
+	void OnTransformVisualApplied(UChessPieceFormData* FormData);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Transform|Visual")
+	void OnTransformVisualRestored(UChessPieceFormData* FormData);
 
 	// Presentation hook kept for Blueprint feedback after C++ grants conversion energy.
 	UFUNCTION(BlueprintImplementableEvent, Category = "Combat")
@@ -123,8 +160,18 @@ private:
 	float MoveElapsedTime = 0.f;
 	bool bIsFailedAttackVisualMove = false;
 	bool bInitializedOnGrid = false;
+	bool bRestoreDefaultVisualOnMoveFinish = false;
 
-	void ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor);
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> DefaultPawnMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> DefaultPawnMaterial;
+
+	bool TryResolveMoveOrAttackToCoord(FIntPoint TargetCoord);
+	bool ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor);
+	bool IsLegalTransformTarget(FIntPoint TargetCoord, UChessPieceFormData* FormData) const;
+	void CacheDefaultPawnVisual();
 	void StartFailedAttackVisualMove(const FVector& From, const FVector& BlockedTarget);
 	void FindEnemyManagerIfNeeded();
 	void FindPickupManagerIfNeeded();

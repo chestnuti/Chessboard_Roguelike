@@ -6,6 +6,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Core/TurnManager.h"
 #include "Core/TurnStateTypes.h"
+#include "Data/ChessPieceFormData.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Enemy/GridEnemyManager.h"
@@ -17,6 +18,7 @@
 #include "Pickup/GridPickupManager.h"
 #include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
+#include "Player/PlayerTransformInventoryComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridPawn, Log, All);
 
@@ -53,11 +55,13 @@ AGridPawn::AGridPawn()
 	TileEffectResolverComponent = CreateDefaultSubobject<UTileEffectResolverComponent>(TEXT("TileEffectResolverComponent"));
 	CombatResolverComponent = CreateDefaultSubobject<UCombatResolverComponent>(TEXT("CombatResolverComponent"));
 	ConversionEnergyComponent = CreateDefaultSubobject<UConversionEnergyComponent>(TEXT("ConversionEnergyComponent"));
+	TransformInventoryComponent = CreateDefaultSubobject<UPlayerTransformInventoryComponent>(TEXT("TransformInventoryComponent"));
 }
 
 void AGridPawn::BeginPlay()
 {
 	Super::BeginPlay();
+	CacheDefaultPawnVisual();
 
 	if (!bAutoInitializeOnBeginPlay || bInitializedOnGrid)
 	{
@@ -212,18 +216,6 @@ void AGridPawn::InitializeOnGrid(AGridManager* InGridManager, ATurnManager* InTu
 
 void AGridPawn::TryMove(FIntPoint Direction)
 {
-	if (!GridManager || !TurnManager)
-	{
-		UE_LOG(LogGridPawn, Warning, TEXT("TryMove ignored: manager reference is null."));
-		return;
-	}
-
-	if (!TurnManager->CanAcceptPlayerInput() || bIsMoving)
-	{
-		// Both the turn state and local interpolation flag guard against repeated key presses.
-		return;
-	}
-
 	const int32 DirectionMagnitude = FMath::Abs(Direction.X) + FMath::Abs(Direction.Y);
 	if (DirectionMagnitude != 1)
 	{
@@ -231,17 +223,141 @@ void AGridPawn::TryMove(FIntPoint Direction)
 		return;
 	}
 
-	const FIntPoint TargetCoord = CurrentGridCoord + Direction;
+	TryResolveMoveOrAttackToCoord(CurrentGridCoord + Direction);
+}
+
+bool AGridPawn::TryTransformMoveToCoord(FIntPoint TargetCoord, UChessPieceFormData* FormData)
+{
+	if (!IsLegalTransformTarget(TargetCoord, FormData))
+	{
+		return false;
+	}
+
+	const bool bAppliedVisualForThisMove = !bIsTransformVisualActive;
+	if (bAppliedVisualForThisMove)
+	{
+		ApplyTransformVisual(FormData);
+	}
+
+	if (!TryResolveMoveOrAttackToCoord(TargetCoord))
+	{
+		if (bAppliedVisualForThisMove)
+		{
+			RestoreDefaultPawnVisual();
+		}
+		return false;
+	}
+
+	bRestoreDefaultVisualOnMoveFinish = bIsTransformVisualActive;
+	return true;
+}
+
+TArray<FTransformMoveTarget> AGridPawn::BuildLegalTransformTargets(UChessPieceFormData* FormData) const
+{
+	TArray<FTransformMoveTarget> Targets;
+	if (!GridManager || !FormData)
+	{
+		return Targets;
+	}
+
+	for (const FIntPoint& Direction : FormData->MoveDirections)
+	{
+		if (Direction == FIntPoint::ZeroValue)
+		{
+			continue;
+		}
+
+		if (FormData->bCanJump)
+		{
+			const FIntPoint CandidateCoord = CurrentGridCoord + Direction;
+
+			FTileData TileData;
+			if (!GridManager->GetTileData(CandidateCoord, TileData)
+				|| !TileData.bWalkable
+				|| TileData.TileType == ETileType::Obstacle)
+			{
+				continue;
+			}
+
+			if (TileData.OccupantType == EGridOccupantType::Empty)
+			{
+				FTransformMoveTarget Target;
+				Target.Coord = CandidateCoord;
+				Target.TargetType = ETransformTargetType::Move;
+				Targets.Add(Target);
+			}
+			else if (TileData.OccupantType == EGridOccupantType::Enemy && FormData->bCanCaptureEnemy)
+			{
+				FTransformMoveTarget Target;
+				Target.Coord = CandidateCoord;
+				Target.TargetType = ETransformTargetType::Capture;
+				Targets.Add(Target);
+			}
+
+			continue;
+		}
+
+		const int32 Range = FMath::Max(1, FormData->MaxRange);
+		for (int32 Step = 1; Step <= Range; ++Step)
+		{
+			const FIntPoint CandidateCoord = CurrentGridCoord + FIntPoint(Direction.X * Step, Direction.Y * Step);
+
+			FTileData TileData;
+			if (!GridManager->GetTileData(CandidateCoord, TileData)
+				|| !TileData.bWalkable
+				|| TileData.TileType == ETileType::Obstacle)
+			{
+				break;
+			}
+
+			if (TileData.OccupantType == EGridOccupantType::Empty)
+			{
+				FTransformMoveTarget Target;
+				Target.Coord = CandidateCoord;
+				Target.TargetType = ETransformTargetType::Move;
+				Targets.Add(Target);
+				continue;
+			}
+
+			if (TileData.OccupantType == EGridOccupantType::Enemy && FormData->bCanCaptureEnemy)
+			{
+				FTransformMoveTarget Target;
+				Target.Coord = CandidateCoord;
+				Target.TargetType = ETransformTargetType::Capture;
+				Targets.Add(Target);
+			}
+
+			break;
+		}
+	}
+
+	return Targets;
+}
+
+bool AGridPawn::TryResolveMoveOrAttackToCoord(FIntPoint TargetCoord)
+{
+	if (!GridManager || !TurnManager)
+	{
+		UE_LOG(LogGridPawn, Warning, TEXT("TryResolveMoveOrAttackToCoord ignored: manager reference is null."));
+		return false;
+	}
+
+	if (!TurnManager->CanAcceptPlayerInput() || bIsMoving)
+	{
+		// Both the turn state and local interpolation flag guard against repeated key presses.
+		return false;
+	}
+
 	if (!GridManager->IsValidCoord(TargetCoord) || !GridManager->IsWalkable(TargetCoord))
 	{
 		// Illegal movement is intentionally silent and does not consume a step.
-		return;
+		return false;
 	}
 
 	FTileData TargetTileData;
 	if (!GridManager->GetTileData(TargetCoord, TargetTileData))
 	{
-		return;
+		return false;
 	}
 
 	if (TargetTileData.OccupantType == EGridOccupantType::Enemy)
@@ -251,17 +367,16 @@ void AGridPawn::TryMove(FIntPoint Direction)
 		{
 			UE_LOG(LogGridPawn, Warning, TEXT("TryMove found enemy occupancy at (%d,%d), but OccupantActor is not AGridEnemyPawn."),
 				TargetCoord.X, TargetCoord.Y);
-			return;
+			return false;
 		}
 
-		ResolveEnemyMeleeAttack(TargetCoord, EnemyActor);
-		return;
+		return ResolveEnemyMeleeAttack(TargetCoord, EnemyActor);
 	}
 
 	if (TargetTileData.OccupantType != EGridOccupantType::Empty)
 	{
 		// Obstacles or unknown occupants are blocked without consuming a step.
-		return;
+		return false;
 	}
 
 	const FVector FromLocation = GetActorLocation();
@@ -275,7 +390,7 @@ void AGridPawn::TryMove(FIntPoint Direction)
 		// GridManager is authoritative; restore input if the final atomic move check fails.
 		TurnManager->EndPlayerAction();
 		RefreshPlayerNextMoveTiles();
-		return;
+		return false;
 	}
 
 	CurrentGridCoord = TargetCoord;
@@ -288,13 +403,14 @@ void AGridPawn::TryMove(FIntPoint Direction)
 	ResolvePickupAtCurrentTile();
 	TurnManager->AddStep();
 	StartVisualMove(FromLocation, ToLocation);
+	return true;
 }
 
-void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor)
+bool AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor)
 {
 	if (!GridManager || !TurnManager || !EnemyActor)
 	{
-		return;
+		return false;
 	}
 
 	const FVector FromLocation = GetActorLocation();
@@ -320,7 +436,7 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 				TargetCoord.X, TargetCoord.Y);
 			TurnManager->EndPlayerAction();
 			RefreshPlayerNextMoveTiles();
-			return;
+			return false;
 		}
 
 		CurrentGridCoord = TargetCoord;
@@ -336,12 +452,105 @@ void AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 
 		TurnManager->AddStep();
 		StartVisualMove(FromLocation, TargetLocation);
-		return;
+		return true;
 	}
 
 	// Failed attacks still spend the player's step but leave occupancy and tile effects unchanged.
 	TurnManager->AddStep();
 	StartFailedAttackVisualMove(FromLocation, TargetLocation);
+	return true;
+}
+
+bool AGridPawn::IsLegalTransformTarget(FIntPoint TargetCoord, UChessPieceFormData* FormData) const
+{
+	if (!FormData)
+	{
+		return false;
+	}
+
+	const TArray<FTransformMoveTarget> LegalTargets = BuildLegalTransformTargets(FormData);
+	return LegalTargets.ContainsByPredicate(
+		[TargetCoord](const FTransformMoveTarget& Candidate)
+		{
+			return Candidate.Coord == TargetCoord;
+		});
+}
+
+void AGridPawn::CacheDefaultPawnVisual()
+{
+	if (!PawnMesh)
+	{
+		return;
+	}
+
+	DefaultPawnMesh = PawnMesh->GetStaticMesh();
+	DefaultPawnMaterial = PawnMesh->GetMaterial(0);
+}
+
+void AGridPawn::ApplyTransformVisual(UChessPieceFormData* FormData)
+{
+	if (!FormData)
+	{
+		return;
+	}
+
+	if (bIsTransformVisualActive && ActiveTransformVisualForm == FormData)
+	{
+		return;
+	}
+
+	if (bIsTransformVisualActive)
+	{
+		RestoreDefaultPawnVisual();
+	}
+
+	ActiveTransformVisualForm = FormData;
+	bIsTransformVisualActive = true;
+
+	if (PawnMesh)
+	{
+		if (!DefaultPawnMesh)
+		{
+			CacheDefaultPawnVisual();
+		}
+
+		if (FormData->FormMesh)
+		{
+			PawnMesh->SetStaticMesh(FormData->FormMesh);
+		}
+
+		if (FormData->FormMaterial)
+		{
+			PawnMesh->SetMaterial(0, FormData->FormMaterial);
+		}
+	}
+
+	OnTransformVisualStateChanged.Broadcast(FormData, true);
+	OnTransformVisualApplied(FormData);
+}
+
+void AGridPawn::RestoreDefaultPawnVisual()
+{
+	UChessPieceFormData* RestoredFormData = ActiveTransformVisualForm;
+
+	if (PawnMesh)
+	{
+		if (DefaultPawnMesh)
+		{
+			PawnMesh->SetStaticMesh(DefaultPawnMesh);
+		}
+
+		if (DefaultPawnMaterial)
+		{
+			PawnMesh->SetMaterial(0, DefaultPawnMaterial);
+		}
+	}
+
+	ActiveTransformVisualForm = nullptr;
+	bIsTransformVisualActive = false;
+
+	OnTransformVisualStateChanged.Broadcast(RestoredFormData, false);
+	OnTransformVisualRestored(RestoredFormData);
 }
 
 void AGridPawn::StartVisualMove(const FVector& From, const FVector& To)
@@ -372,6 +581,11 @@ void AGridPawn::FinishVisualMove()
 {
 	// Snap at the end to prevent small interpolation drift from desyncing visuals and grid state.
 	SetActorLocation(VisualMoveTo);
+	if (bRestoreDefaultVisualOnMoveFinish)
+	{
+		RestoreDefaultPawnVisual();
+		bRestoreDefaultVisualOnMoveFinish = false;
+	}
 	bIsMoving = false;
 	bIsFailedAttackVisualMove = false;
 	MoveElapsedTime = 0.f;

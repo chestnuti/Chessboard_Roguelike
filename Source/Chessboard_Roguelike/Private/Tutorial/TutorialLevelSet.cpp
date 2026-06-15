@@ -58,6 +58,13 @@ namespace
 		return Enemy;
 	}
 
+	FTutorialPickupSpawnData MakePickup(FIntPoint Coord)
+	{
+		FTutorialPickupSpawnData Pickup;
+		Pickup.Coord = Coord;
+		return Pickup;
+	}
+
 	FTutorialLevelDefinition BuildTileAttributesLevel()
 	{
 		FTutorialLevelDefinition Level;
@@ -154,6 +161,32 @@ namespace
 		Level.Enemies.Add(MakeEnemy(FIntPoint(0, 9), EEnemyFaction::Construct, EEnemyBehaviorType::Melee, 2));
 		return Level;
 	}
+
+	FTutorialLevelDefinition BuildHealthAndTransformLevel()
+	{
+		FTutorialLevelDefinition Level;
+		Level.LevelId = TEXT("Tutorial_06_HealthAndTransform");
+		Level.StartCoord = FIntPoint(1, 1);
+		Level.ExitCoord = FIntPoint(8, 8);
+		AddDefaultTiles(Level);
+
+		SetTileType(Level, FIntPoint(2, 1), ETileType::Construct);
+		SetTileType(Level, FIntPoint(3, 2), ETileType::Construct);
+		SetTileType(Level, FIntPoint(5, 2), ETileType::Acid);
+		SetTileType(Level, FIntPoint(1, 3), ETileType::Acid);
+		SetTileType(Level, FIntPoint(3, 5), ETileType::Construct);
+		SetTileType(Level, FIntPoint(6, 6), ETileType::Acid);
+		SetTileType(Level, FIntPoint(7, 7), ETileType::Construct);
+
+		Level.Pickups.Add(MakePickup(FIntPoint(2, 1)));
+		Level.Pickups.Add(MakePickup(FIntPoint(1, 3)));
+		Level.Pickups.Add(MakePickup(FIntPoint(7, 7)));
+		Level.Pickups.Add(MakePickup(FIntPoint(3, 2)));
+		Level.Pickups.Add(MakePickup(FIntPoint(5, 2)));
+		Level.Pickups.Add(MakePickup(FIntPoint(3, 5)));
+		Level.Pickups.Add(MakePickup(FIntPoint(6, 6)));
+		return Level;
+	}
 }
 
 UTutorialLevelSet::UTutorialLevelSet()
@@ -163,4 +196,5 @@ UTutorialLevelSet::UTutorialLevelSet()
 	TutorialLevels.Add(BuildConversionEnergyLevel());
 	TutorialLevels.Add(BuildRangedFriendlyFireLevel());
 	TutorialLevels.Add(BuildFactionSuppressionLevel());
+	TutorialLevels.Add(BuildHealthAndTransformLevel());
 }
