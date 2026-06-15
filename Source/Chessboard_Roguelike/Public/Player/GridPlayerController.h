@@ -192,6 +192,7 @@ private:
 	EPlayerControlMode ControlMode = EPlayerControlMode::DefaultWASD;
 	bool bEdgeScrollEnabled = false;
 	bool bIsCameraDragging = false;
+	bool bTransformSelectionInProgress = false;
 	bool bRestoreCameraAfterTransformMove = false;
 	bool bRightMousePressedForTransform = false;
 	bool bHasWrittenMouseHoverGridParameters = false;

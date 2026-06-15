@@ -84,6 +84,7 @@ void UCombatCameraDirectorComponent::FocusGridTileBriefly(const FVector& TargetW
 
 	StartTargetOffset = SpringArm->TargetOffset;
 	StartArmLength = SpringArm->TargetArmLength;
+	FocusWorldLocation = TargetWorldLocation;
 	FocusTargetOffset = CalculateFocusTargetOffset(SpringArm, TargetWorldLocation);
 	FocusArmLength = FMath::Max(0.f, RestArmLength - ZoomInDistance);
 
@@ -111,6 +112,7 @@ void UCombatCameraDirectorComponent::StopFocus()
 	RuntimeFocusInDuration = 0.f;
 	RuntimeFocusHoldDuration = 0.f;
 	RuntimeFocusOutDuration = 0.f;
+	FocusWorldLocation = FVector::ZeroVector;
 	ElapsedRealTime = 0.f;
 	LastRealTimeSeconds = 0.0;
 	bFocusActive = false;
@@ -237,6 +239,17 @@ void UCombatCameraDirectorComponent::RestoreTransformTargetingCameraSession()
 		return;
 	}
 
+	if (bFocusActive)
+	{
+		StopFocus();
+		SpringArm = FindSpringArm();
+		if (!SpringArm)
+		{
+			bHasTransformTargetingRestTargetOffset = false;
+			return;
+		}
+	}
+
 	SpringArm->TargetOffset = bHasTransformTargetingRestTargetOffset
 		? TransformTargetingRestTargetOffset
 		: FVector::ZeroVector;
@@ -299,22 +312,23 @@ void UCombatCameraDirectorComponent::ApplyFocusState(float Alpha)
 	const float HoldEnd = RuntimeFocusInDuration + RuntimeFocusHoldDuration;
 	const float TotalDuration = GetTotalDuration();
 	const float CurrentTime = Alpha * TotalDuration;
+	const FVector CurrentFocusTargetOffset = CalculateFocusTargetOffset(SpringArm, FocusWorldLocation);
 
-	FVector NewTargetOffset = FocusTargetOffset;
+	FVector NewTargetOffset = CurrentFocusTargetOffset;
 	float NewArmLength = FocusArmLength;
 
 	if (RuntimeFocusInDuration > KINDA_SMALL_NUMBER && CurrentTime < InEnd)
 	{
 		float BlendAlpha = FMath::Clamp(CurrentTime / RuntimeFocusInDuration, 0.f, 1.f);
 		BlendAlpha = BlendAlpha * BlendAlpha * (3.f - 2.f * BlendAlpha);
-		NewTargetOffset = FMath::Lerp(StartTargetOffset, FocusTargetOffset, BlendAlpha);
+		NewTargetOffset = FMath::Lerp(StartTargetOffset, CurrentFocusTargetOffset, BlendAlpha);
 		NewArmLength = FMath::Lerp(StartArmLength, FocusArmLength, BlendAlpha);
 	}
 	else if (RuntimeFocusOutDuration > KINDA_SMALL_NUMBER && CurrentTime > HoldEnd)
 	{
 		float OutAlpha = FMath::Clamp((CurrentTime - HoldEnd) / RuntimeFocusOutDuration, 0.f, 1.f);
 		OutAlpha = OutAlpha * OutAlpha * (3.f - 2.f * OutAlpha);
-		NewTargetOffset = FMath::Lerp(FocusTargetOffset, RestTargetOffset, OutAlpha);
+		NewTargetOffset = FMath::Lerp(CurrentFocusTargetOffset, RestTargetOffset, OutAlpha);
 		NewArmLength = FMath::Lerp(FocusArmLength, RestArmLength, OutAlpha);
 	}
 

@@ -61,6 +61,7 @@
 - `MapSystem`：网格地图、地块状态、占据状态、地形转换
 - `PCGSystem`：种子生成、分区、地块分布、可达性修正
 - `PlayerSystem`：移动、攻击、属性值、单个能量槽
+- `TransformSystem`：变身棋子拾取、背包堆叠、轮盘选择、特殊移动、形态视觉切换
 - `EnemySystem`：敌人数据、AI 行为、伤害判定、死亡逻辑
 - `CombatSystem`：攻击结算、免疫、压制、友伤、退回规则
 - `UISystem`：HUD、提示、能量显示、状态反馈
@@ -79,7 +80,7 @@
 一次玩家输入构成一个“步”，其标准执行顺序如下：
 
 1. 校验玩家输入是否合法
-2. 执行玩家移动或攻击
+2. 执行玩家默认移动、近战攻击或已确认的变身特殊移动
 3. 结算玩家本步产生的地块/资源变化
 4. 触发敌人逐个行动
 5. 结算敌人移动、攻击、远程蓄力与死亡
@@ -297,6 +298,25 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 
 技术上建议以敌人状态标记实现，而非在玩家身上写死免疫逻辑，这样后续可扩展为“临时压制”“持续若干回合压制”等规则。压制状态与免疫效果可叠加，不互斥。
 
+### 6.5 变身棋子系统
+
+变身棋子是一次性战术移动资源，用于在默认 WASD 四向单格移动之外提供特殊走法。
+
+- 变身棋子由地图中的可拾取道具提供，拾取后进入玩家变身背包，同类棋子堆叠计数。
+- 背包通过 4 槽轮盘呈现，槽位分别对应 `Knight`、`Bishop`、`Rook`、`Queen`。
+- 默认状态下玩家仍使用 WASD 移动；只有按住 G 打开轮盘并点击棋子槽位后，才进入变身目标选择。
+- 进入目标选择时立即切换玩家棋子模型或材质；此阶段不消耗库存。
+- 左键点击合法目标并成功开始移动后，消耗 1 个对应变身棋子。
+- 按 ESC 或右键短按取消变身时不消耗资源，并恢复默认棋子模型。
+- 变身移动或变身击杀完成后，玩家自动恢复默认棋子模型，并按一次玩家行动推进回合。
+- `Knight` 形态按 8 个 L 形偏移跳跃，允许越过中间格。
+- `Bishop` 形态沿 4 个斜向移动任意距离，不可穿越障碍或敌人。
+- `Rook` 形态沿上下左右 4 向移动任意距离，不可穿越障碍或敌人。
+- `Queen` 形态沿 8 向移动任意距离，阻挡与击杀限制同 `Rook` 和 `Bishop`。
+- 长距离形态扫描方向时，遇到首个可击杀敌人可生成击杀目标，并停止继续扫描该方向。
+- 目标选择阶段启用边缘滚屏，支持查看默认视角外的合法目标；右键拖动相机时暂停边缘滚屏和左键确认。
+- 鼠标悬停合法目标时写入全局材质参数，供目标格材质显示 hover 状态。
+
 ---
 
 ## 7. 战斗与伤害结算
@@ -489,6 +509,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 构成值进度
 - 酸性值进度
 - 当前持有的地块转换能量状态
+- 变身棋子库存计数
 - 当前回合提示
 - 敌人压制状态提示
 
@@ -509,6 +530,8 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 
 - 地块转换必须有显著视觉切换
 - 玩家回到输入阶段时，应高亮下一步可移动到的空白相邻格；玩家动作和敌人回合解析期间应清空该提示，避免显示过期移动目标。
+- 变身目标选择阶段应高亮所有合法移动或击杀目标，并在鼠标悬停格显示额外 hover 反馈。
+- 远距离变身目标选择时，边缘滚屏必须保持目标格、鼠标射线和点击确认一致。
 - 属性变化应有即时数字或条形反馈
 - 远程敌人瞄准回合需要明确提示
 
@@ -532,6 +555,9 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `EEnemyBehavior`：近战、远程
 - `ETurnState`：初始化、玩家输入、玩家动作结算、敌人行动、地图结算、终局检查、胜利、失败
 - `EResourceType`：构成能量、酸性能量
+- `EChessTransformType`：无、骑士、教皇、战车、皇后
+- `ETransformTargetType`：移动目标、击杀目标
+- `EPlayerControlMode`：默认 WASD、变身轮盘、变身目标选择
 
 ### 11.2 核心结构体
 
@@ -554,6 +580,11 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `ADungeonRunManager`：运行时关卡初始化 Actor，支持 PCG 模式和固定教学模式，负责生成或读取布局、应用棋盘、初始化玩家、可选敌人、固定教学敌人和可选拾取物
 - `AGridPickupActor`：按棋盘坐标放置的可拾取道具基类，具体效果由子类或蓝图覆写
 - `AGridPickupManager`：按坐标注册、查询和结算拾取物的运行时管理器
+- `FTransformMoveTarget`：变身目标格、目标类型、目标敌人引用、世界坐标
+- `UChessPieceFormData`：变身形态 DataAsset，包含形态类型、显示名、图标、模型、材质、移动方向、最大距离、是否跳跃、是否可击杀
+- `UPlayerTransformInventoryComponent`：玩家变身背包组件，负责拾取、堆叠、查询、消耗和刷新事件
+- `AGridTransformPiecePickupActor`：地图变身道具 Actor，负责提供具体形态并在拾取后写入背包
+- `UTransformWheelWidget`：G 键轮盘 UI，负责展示 4 个槽位、库存数量和槽位点击选择
 
 ### 11.3 存档建议
 
@@ -585,6 +616,12 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `OnEnemyKilled`
 - `OnEnergyGained`
 - `OnEnergyConsumed`
+- `OnTransformInventoryChanged`
+- `OnTransformSelectionStarted`
+- `OnTransformSelectionCancelled`
+- `OnTransformVisualStateChanged`
+- `OnTransformMoveCommitted`
+- `OnTransformMoveFinished`
 - `OnTurnEnded`
 - `OnVictory`
 - `OnDefeat`
@@ -618,6 +655,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 完成远程敌人蓄力逻辑
 - 完成友伤清除链表现与压制状态反馈
 - 完成基础 UI 和反馈
+- 完成变身棋子拾取、背包、轮盘选择、目标高亮、边缘滚屏和一次性特殊移动
 - 完成 5 个固定教学关卡 Map 与教学 DataAsset
 - 完成房间级胜负流转
 - 完成多房间激活与无缝推进
@@ -666,6 +704,10 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 远程敌人蓄力回合数
 - 转换能量存储上限
 - 3×3 转换范围
+- 变身道具掉落概率
+- 各变身棋子库存上限或推荐持有量
+- 各变身形态移动方向、最大距离和跳跃规则
+- 变身目标选择边缘滚屏速度、触发边距和最大相机偏移
 - 地图生成中地块比例
 - 起点安全区半径
 
@@ -681,6 +723,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 近战攻击与退回
 - 双属性值与压制机制
 - 1 套转换能量机制
+- 1 套基础变身棋子机制，至少包含拾取、库存、轮盘选择、目标选择、取消和消耗规则
 - 胜负判定
 - 基础 UI
 
@@ -709,6 +752,11 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 
 - 玩家因障碍或墙体导致的移动失败不消耗步数；玩家主动向敌人格移动但未击杀目标时，消耗步数并退回原格。
 - 目标格已有敌人时仅触发攻击，不允许穿越。
+- 默认状态下玩家使用 WASD 四向单格移动；变身棋子仅影响一次被选择的特殊移动。
+- 按住 G 打开变身轮盘，点击有库存且有合法目标的槽位后进入目标选择；进入目标选择会立即切换棋子模型。
+- 变身目标选择阶段按 ESC 或右键短按取消，不消耗对应棋子并恢复默认模型。
+- 变身移动或击杀成功开始后才消耗 1 个对应棋子；移动完成后恢复默认模型并推进回合。
+- `Rook` 和 `Queen` 等远距离形态不可跨越敌人或障碍，但可以选择击杀路径上遇到的首个合法敌人。
 - 敌人 HP 阈值通过 `EnemySpawnPool` 单项配置与候选点深度计算，越靠后的房间可以生成更高 `KillThreshold` 的敌人。
 - 远程敌人采用四向直线范围攻击，若玩家不在攻击线内则追逐玩家。
 - 地块转换不会覆盖障碍物与特殊事件。

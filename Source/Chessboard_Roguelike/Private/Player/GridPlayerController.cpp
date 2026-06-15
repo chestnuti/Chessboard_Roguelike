@@ -220,7 +220,7 @@ void AGridPlayerController::HandleUseEnergyStarted()
 
 void AGridPlayerController::HandleTransformWheelStarted()
 {
-	if (ControlMode != EPlayerControlMode::DefaultWASD)
+	if (bTransformSelectionInProgress || ControlMode != EPlayerControlMode::DefaultWASD)
 	{
 		return;
 	}
@@ -248,7 +248,7 @@ void AGridPlayerController::HandleTransformWheelStarted()
 
 void AGridPlayerController::HandleTransformWheelReleased()
 {
-	if (ControlMode == EPlayerControlMode::TransformWheel)
+	if (!bTransformSelectionInProgress && ControlMode == EPlayerControlMode::TransformWheel)
 	{
 		HideTransformWheel();
 		ReturnToDefaultWASD();
@@ -387,33 +387,37 @@ void AGridPlayerController::RefreshTransformWheel()
 
 void AGridPlayerController::RequestSelectTransform(UChessPieceFormData* FormData)
 {
-	if (ControlMode != EPlayerControlMode::TransformWheel || !FormData)
+	if (bTransformSelectionInProgress || ControlMode != EPlayerControlMode::TransformWheel || !FormData)
 	{
 		return;
 	}
+
+	bTransformSelectionInProgress = true;
 
 	AGridPawn* GridPawn = GetGridPawn();
 	if (!GridPawn || !GridPawn->TransformInventoryComponent
 		|| !GridPawn->TransformInventoryComponent->CanConsumeTransformPiece(FormData->TransformType, 1))
 	{
+		bTransformSelectionInProgress = false;
 		return;
 	}
 
 	PendingTransformTargets = GridPawn->BuildLegalTransformTargets(FormData);
 	if (PendingTransformTargets.IsEmpty())
 	{
+		bTransformSelectionInProgress = false;
 		return;
 	}
 
-	HideTransformWheel();
-
 	PendingTransformForm = FormData;
-	GridPawn->ApplyTransformVisual(FormData);
 	ControlMode = EPlayerControlMode::TransformTargeting;
 	bEdgeScrollEnabled = true;
 	bIsCameraDragging = false;
 	bShowMouseCursor = true;
 	bRestoreCameraAfterTransformMove = false;
+
+	HideTransformWheel();
+	GridPawn->ApplyTransformVisual(FormData);
 
 	if (CombatCameraDirectorComponent)
 	{
@@ -426,6 +430,8 @@ void AGridPlayerController::RequestSelectTransform(UChessPieceFormData* FormData
 	InputMode.SetHideCursorDuringCapture(false);
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(InputMode);
+
+	bTransformSelectionInProgress = false;
 }
 
 void AGridPlayerController::CancelTransformTargeting()
@@ -440,6 +446,7 @@ void AGridPlayerController::CancelTransformTargeting()
 	PendingTransformTargets.Reset();
 	bEdgeScrollEnabled = false;
 	bIsCameraDragging = false;
+	bTransformSelectionInProgress = false;
 	bRestoreCameraAfterTransformMove = false;
 	WriteMouseHoverGridMaterialParameters(FIntPoint::ZeroValue, false);
 	if (CombatCameraDirectorComponent)
@@ -456,6 +463,7 @@ void AGridPlayerController::FinishTransformTargeting()
 	PendingTransformTargets.Reset();
 	bEdgeScrollEnabled = false;
 	bIsCameraDragging = false;
+	bTransformSelectionInProgress = false;
 	bRestoreCameraAfterTransformMove = true;
 	WriteMouseHoverGridMaterialParameters(FIntPoint::ZeroValue, false);
 	ReturnToDefaultWASD();
@@ -466,6 +474,7 @@ void AGridPlayerController::ReturnToDefaultWASD()
 	ControlMode = EPlayerControlMode::DefaultWASD;
 	bEdgeScrollEnabled = false;
 	bIsCameraDragging = false;
+	bTransformSelectionInProgress = false;
 	bShowMouseCursor = false;
 	WriteMouseHoverGridMaterialParameters(FIntPoint::ZeroValue, false);
 

@@ -71,6 +71,7 @@ private:
 	FVector RestTargetOffset = FVector::ZeroVector;
 	FVector StartTargetOffset = FVector::ZeroVector;
 	FVector FocusTargetOffset = FVector::ZeroVector;
+	FVector FocusWorldLocation = FVector::ZeroVector;
 	FVector TransformTargetingRestTargetOffset = FVector::ZeroVector;
 
 	float RestArmLength = 0.f;
