@@ -57,7 +57,7 @@
 
 ### 3.1 推荐模块划分
 
-- `GameFlow`：对局状态机、回合推进、胜负判定
+- `GameFlow`：对局状态机、回合推进、胜负判定、关卡推进
 - `MapSystem`：网格地图、地块状态、占据状态、地形转换
 - `PCGSystem`：种子生成、分区、地块分布、可达性修正
 - `PlayerSystem`：移动、攻击、属性值、单个能量槽
@@ -172,7 +172,9 @@
 - `UDungeonGenerationSettings` 是独立的地牢生成 DataAsset，承载 Seed、地图尺寸、L-System axiom/rules、迭代次数、房间半径、边界噪声、房间间隔、走廊宽度、崎岖概率、地块属性概率、出生候选数量、最大生成尝试次数和起点安全半径。
 - `ULSystemDungeonGenerator::GenerateDungeonLayout()` 负责根据配置生成 `FGeneratedDungeonLayout`，其中包含格子布局、房间节点、连接边、起点、出口和出生候选点。
 - `ULSystemDungeonGenerator::ValidateConnectivity()` 使用 Flood Fill 校验所有房间中心从起点可达。
-- `ADungeonRunManager::GenerateAndInitializeRun()` 是运行时接入口，执行“生成布局 -> 应用到 GridManager -> 初始化玩家 -> 可选生成敌人 -> 可选生成拾取物 -> 初始化 EnemyManager -> 设置 PlayerInput”。
+- `ULSystemDungeonGenerator` 支持可选的 `TargetRoomCount` 精确房间数约束。`TargetRoomCount = 0` 时保持“最多 `MaxRoomCount`”的生成行为；大于 `0` 时，生成结果必须拥有精确数量的房间，否则本次尝试失败并按 `MaxGenerationAttempts` 重试。
+- `ADungeonRunManager::StartLevel(LevelIndex)` 是当前关卡推进入口，负责清理上一关运行时 Actor、根据当前关卡生成运行时 PCG 配置、调用 `GenerateAndInitializeRun()`，并广播关卡开始事件。
+- `ADungeonRunManager::GenerateAndInitializeRun()` 是单关初始化接入口，执行“生成布局 -> 应用到 GridManager -> 初始化玩家 -> 可选生成敌人 -> 可选生成拾取物 -> 初始化 EnemyManager -> 设置 PlayerInput”。
 
 当前阶段不依赖 UE PCG 插件。原因是本项目的首要需求是回合制逻辑格、可达性保证和种子复现；UE PCG Graph 更适合后续生成墙体 Mesh、装饰和场景资产散布。
 
@@ -195,7 +197,7 @@
 
 1. `BuildRoomGraph`：展开 L-System 字符串，生成房间节点和连接关系。新房间会按半径、`BoundaryNoise` 和 `RoomSeparation` 检查与已有房间的中心距离；如果多次尝试后仍找不到非重叠位置，该节点会被跳过。
 2. `RasterizeLayout`：把房间节点雕刻为不规则房间，把连接关系雕刻为崎岖走廊。房间格发生局部重叠时，Tile 优先保留较低 `Depth` 的房间归属；走廊不会覆盖已有房间、起点或出口的 `RegionId` 和 `Depth`。
-3. `AssignTileTypes`：在可通行格上分配 `Minimal`、`Construct`、`Acid`，墙体固定为 `Obstacle`。
+3. `AssignTileTypes`：在可通行格上分配 `Minimal`、`Construct`、`Acid`，墙体固定为 `Obstacle`。若 `ConstructTileChance` 或 `AcidTileChance` 大于 `0`，生成器会在非 `Start` / 非 `Exit` 的可转换区域中兜底保证至少存在对应属性地块，避免单房间关卡全为 `Minimal`。
 4. `BuildSpawnCandidates`：先从起点执行 Flood Fill 得到可达格集合，再生成敌人、事件、奖励候选点；候选点必须可达，并避开起点安全区、墙、出口中心和不可通行格。
 5. `ValidateConnectivity`：从起点 Flood Fill，确保所有房间中心可达。
 
@@ -256,6 +258,56 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `MinDepth` / `MaxDepth`：该道具类型允许出现的候选深度范围。
 
 首个具体道具为 `AGridHealthPickupActor` / `BP_HealthPickup`，默认调用 `UPlayerAttributeComponent::Heal(1)` 回复 1 点 HP。
+
+#### 5.6.4 关卡推进与动态难度缩放
+
+当前工程支持以 `ADungeonRunManager` 为入口的多关卡推进。该流程面向 PCG 常规关卡，不影响 `TutorialFixed` 教学模式。
+
+核心字段：
+
+- `CurrentDungeonLevel`：当前关卡编号，最小为 `1`。
+- `bUseLevelScaling`：是否根据当前关卡动态派生 PCG 参数。
+- `SeedMode`：生成种子模式。默认 `RandomSeedPerLevelStart`，每次开始关卡都会生成不同种子；`ConfiguredSeed` 用于固定种子复现。
+- `CurrentRunSeed`：本次关卡实际使用的种子，供日志、调试和复现记录使用。
+- `bAutoAdvanceToNextLevel`：胜利后是否自动进入下一关。
+- `AutoAdvanceDelay`：自动进入下一关前的延迟秒数。
+- `RuntimeDungeonGenerationSettings`：运行时复制出的临时 `UDungeonGenerationSettings`，用于承载本关派生参数，不直接修改原始 DataAsset。
+
+核心函数：
+
+- `StartLevel(LevelIndex)`：开始指定关卡。内部会清理上一关敌人和拾取物，按关卡数构造运行时设置，然后执行单关生成和初始化。
+- `AdvanceToNextLevel()`：进入 `CurrentDungeonLevel + 1`。
+- `CompleteCurrentLevel()`：标记当前关完成，设置 `ETurnState::Victory`，广播 `OnDungeonLevelCompleted`，并按配置决定是否延迟自动推进。
+- `OnDungeonLevelStarted(LevelIndex)`：关卡开始事件，供 UI 或蓝图刷新关卡显示。
+- `OnDungeonLevelCompleted(CompletedLevelIndex, NextLevelIndex)`：关卡完成事件，供 UI 显示胜利面板或“下一关”按钮。
+
+`UDungeonGenerationSettings.LevelScaling` 控制关卡缩放：
+
+- `RoomsPerLevel`：每关增加的房间数。默认 `1` 时，第 1 关目标 1 房间，第 2 关目标 2 房间，以此类推。
+- `BaseEnemyCount`：第 1 关基础敌人数。
+- `EnemyCountPerLevel`：每升一关额外增加的敌人数。
+- `BasePickupCount`：第 1 关基础拾取物数。
+- `PickupCountPerLevel`：每升一关额外增加的拾取物数。
+- `bRequireExactRoomCount`：为 `true` 时写入 `TargetRoomCount`，要求 PCG 精确生成目标房间数；为 `false` 时仅写入 `MaxRoomCount`，允许少于目标数量。
+
+运行时缩放公式：
+
+```text
+TargetRooms = Max(1, CurrentDungeonLevel * RoomsPerLevel)
+EnemySpawnCount = Max(0, BaseEnemyCount + (CurrentDungeonLevel - 1) * EnemyCountPerLevel)
+PickupSpawnCount = Max(0, BasePickupCount + (CurrentDungeonLevel - 1) * PickupCountPerLevel)
+Seed = RandomSeedPerLevelStart ? RuntimeRandomSeed : BaseSeed + CurrentDungeonLevel * 1009
+```
+
+默认情况下，`ADungeonRunManager` 使用 `RandomSeedPerLevelStart`。每次 `StartLevel()` 或直接 `GenerateAndInitializeRun()` 时都会复制 `DungeonGenerationSettings` 到 `RuntimeDungeonGenerationSettings`，生成新的运行时 seed，并写入 `CurrentRunSeed`。需要复现固定地图时，将 `SeedMode` 切换为 `ConfiguredSeed`，并使用记录下来的 `CurrentRunSeed` 作为基础 seed 进行调试。
+
+胜利条件当前为“本关所有敌人死亡”。`AGridEnemyManager` 监听每个敌人的 `OnGridEnemyKilled`，敌人死亡后会清理无效引用；当 `GetAliveEnemies()` 为空时广播 `OnAllEnemiesCleared`。`ADungeonRunManager` 绑定该事件并调用 `CompleteCurrentLevel()`。玩家杀死最后一个敌人后，`AGridPawn::ResolvePostPlayerActionTurn()` 会检测 `Victory` / `Defeat`，避免继续进入敌人回合或把状态切回 `PlayerInput`。
+
+进入下一关前必须清理运行时 Actor：
+
+- `AGridEnemyManager::ClearAllEnemies()` 会解绑敌人死亡事件、清空棋盘占位、销毁敌人 Actor，并重置 `RegisteredEnemies`。
+- `AGridPickupManager::ClearAllPickups()` 会销毁并清空当前拾取物。
+- `AGridManager::ApplyTileLayout()` 只负责清空棋盘格数据和重建地块视觉，不负责销毁旧敌人 Actor，因此关卡推进必须通过 `ADungeonRunManager::StartLevel()` 进入。
 
 ---
 
@@ -492,7 +544,7 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 转换能量应作为独立资源对象管理
 - 使用前仅需检查是否持有能量，无需管理队列
 - 地块转换应走统一的地图修改接口，确保同步 UI、可达性与 VFX
-- PCG 起点区域 `Start` 保持 `Minimal`，但允许转换；出口 `Exit` 和墙体/障碍仍不可转换。
+- PCG 出生安全区 `Start` 保持 `Minimal`，但允许转换；起始房间安全区外仍为 `Room`，可参与属性地块分配和敌人/奖励候选生成；出口 `Exit` 和墙体/障碍仍不可转换。
 
 ### 9.5 风险点
 
@@ -570,14 +622,15 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `FTutorialEnemySpawnData`：教学关卡固定敌人描述，包含坐标、敌人类、阵营、行为类型、击杀阈值和远程攻击距离
 - `FTutorialLevelDefinition`：教学关卡固定布局描述，包含关卡 ID、10x10 尺寸、玩家起点、出口、100 个地块和固定敌人列表
 - `FDungeonPickupSpawnEntry`：拾取物生成池条目，包含道具类、权重和深度范围
+- `FDungeonLevelScalingSettings`：关卡推进缩放配置，包含每关房间数、敌人数、拾取物数和是否要求精确房间数
 - `FPlayerState`：HP、构成值、酸性值、当前持有能量、位置
 - `FEnemyState`：阵营、行为类型、HP阈值、状态机、位置、是否压制
 - `FEnemyAttackDamage`：敌人对玩家造成的 HP 伤害、构成值变化、酸性值变化
 - `FEnemyAttackResolveResult`：敌人攻击玩家后的伤害是否生效、玩家是否失败、剩余 HP
 - `FTurnContext`：当前步数、动作来源、事件列表
-- `UDungeonGenerationSettings`：地牢生成 DataAsset，承载种子、L-System、房间、走廊和可达性约束
+- `UDungeonGenerationSettings`：地牢生成 DataAsset，承载种子、L-System、房间、走廊、可达性约束、刷怪/拾取物池和关卡缩放配置
 - `UTutorialLevelSet`：教学关卡 DataAsset，承载固定教学布局和固定敌人配置
-- `ADungeonRunManager`：运行时关卡初始化 Actor，支持 PCG 模式和固定教学模式，负责生成或读取布局、应用棋盘、初始化玩家、可选敌人、固定教学敌人和可选拾取物
+- `ADungeonRunManager`：运行时关卡初始化与推进 Actor，支持 PCG 模式和固定教学模式，负责生成或读取布局、应用棋盘、初始化玩家、生成敌人/拾取物、按当前关卡派生运行时 PCG 参数，以及处理本关完成和下一关推进
 - `AGridPickupActor`：按棋盘坐标放置的可拾取道具基类，具体效果由子类或蓝图覆写
 - `AGridPickupManager`：按坐标注册、查询和结算拾取物的运行时管理器
 - `FTransformMoveTarget`：变身目标格、目标类型、目标敌人引用、世界坐标
@@ -623,6 +676,9 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `OnTransformMoveCommitted`
 - `OnTransformMoveFinished`
 - `OnTurnEnded`
+- `OnDungeonLevelStarted`
+- `OnDungeonLevelCompleted`
+- `OnAllEnemiesCleared`
 - `OnVictory`
 - `OnDefeat`
 
@@ -657,7 +713,9 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 完成基础 UI 和反馈
 - 完成变身棋子拾取、背包、轮盘选择、目标高亮、边缘滚屏和一次性特殊移动
 - 完成 5 个固定教学关卡 Map 与教学 DataAsset
-- 完成房间级胜负流转
+- 完成击杀本关所有敌人后的胜利判定
+- 完成基于关卡编号的 PCG 房间数、敌人数和拾取物数缩放
+- 完成下一关重新生成和运行时 Actor 清理
 - 完成多房间激活与无缝推进
 
 ### 13.3 内容扩展阶段
@@ -688,6 +746,9 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 地块转换是否会导致地图失真或失去挑战
 - 远程敌人的蓄力是否清晰且可被反制
 - 地图是否能稳定生成可达解
+- 要求精确房间数时，`MaxGenerationAttempts` 是否足以覆盖房间放置失败的重试场景
+- 击杀最后一个敌人后，回合状态是否保持 `Victory`，且不会继续触发敌人回合
+- 进入下一关后，上一关敌人 Actor、拾取物 Actor 和棋盘占位是否全部清理
 
 ---
 
@@ -710,6 +771,10 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 变身目标选择边缘滚屏速度、触发边距和最大相机偏移
 - 地图生成中地块比例
 - 起点安全区半径
+- 每关目标房间数增长
+- 每关敌人数增长
+- 每关拾取物数量增长
+- 是否要求 PCG 精确生成目标房间数
 
 ---
 
@@ -758,6 +823,10 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - 变身移动或击杀成功开始后才消耗 1 个对应棋子；移动完成后恢复默认模型并推进回合。
 - `Rook` 和 `Queen` 等远距离形态不可跨越敌人或障碍，但可以选择击杀路径上遇到的首个合法敌人。
 - 敌人 HP 阈值通过 `EnemySpawnPool` 单项配置与候选点深度计算，越靠后的房间可以生成更高 `KillThreshold` 的敌人。
+- 常规 PCG 关卡可通过 `ADungeonRunManager::StartLevel()` / `AdvanceToNextLevel()` 推进；第 N 关可由 `LevelScaling` 派生 N 个目标房间、递增敌人数和递增拾取物数。
+- `TargetRoomCount > 0` 时，PCG 必须精确生成目标房间数；若生成不足或超出，本次尝试失败并使用递增种子重试。
+- 当前常规关卡胜利条件为本关所有敌人死亡；胜利后 `TurnManager` 进入 `Victory`，不会继续推进敌人回合。
+- 下一关开始前必须通过 `ADungeonRunManager` 清理旧敌人和旧拾取物，不能只调用 `GenerateAndInitializeRun()`。
 - 远程敌人采用四向直线范围攻击，若玩家不在攻击线内则追逐玩家。
 - 地块转换不会覆盖障碍物与特殊事件。
 - 压制状态与免疫效果可叠加，被压制敌人仍保持对应免疫。

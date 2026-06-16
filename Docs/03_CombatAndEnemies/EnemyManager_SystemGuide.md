@@ -17,6 +17,7 @@
 7. 若存在敌人正在播放移动插值，`AGridEnemyManager` 会保持 `EnemyTurnResolve`，等所有敌人移动完成后再结束敌方回合。
 8. 若玩家 HP 在敌方回合中降至 `0`，`ATurnManager` 进入 `Defeat`，敌人管理器停止后续敌人行动。
 9. 如果玩家未失败，敌方回合结束后，`ATurnManager::EndEnemyTurn()` 回到 `PlayerInput`。
+10. 如果最后一个敌人死亡，`AGridEnemyManager` 广播 `OnAllEnemiesCleared`。常规 PCG 关卡中，`ADungeonRunManager` 监听该事件并将回合状态切换为 `Victory`。
 
 ## 类职责
 
@@ -25,7 +26,7 @@
 | `AGridManager` | 维护格子数据、占据状态、移动合法性和坐标转换 |
 | `ATurnManager` | 维护回合状态和玩家步数 |
 | `AGridEnemyPawn` | 表示单个敌人，持有阵营、行为类型、阈值、坐标、死亡状态和基础行动 |
-| `AGridEnemyManager` | 维护敌人列表，统一执行敌方回合，并处理敌人死亡后的相机聚焦和玩家转换能量授予 |
+| `AGridEnemyManager` | 维护敌人列表，统一执行敌方回合，处理敌人死亡后的相机聚焦和玩家转换能量授予，并在敌人全灭时通知关卡推进系统 |
 
 ## 新增文件
 
@@ -44,8 +45,10 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 | `RegisterEnemy()` | 注册单个敌人 |
 | `UnregisterEnemy()` | 移除单个敌人 |
 | `RebuildEnemyList()` | 通过 `TActorIterator` 重新扫描场景中的敌人 |
+| `ClearAllEnemies()` | 解绑死亡事件、清空棋盘占位、销毁已注册敌人，并重置敌人列表。进入下一关前由 `ADungeonRunManager` 调用 |
 | `ExecuteEnemyTurn()` | 执行一轮敌方行动 |
 | `GetAliveEnemies()` | 返回当前存活敌人列表 |
+| `OnAllEnemiesCleared` | 敌人全灭事件。最后一个敌人死亡后广播，`ADungeonRunManager` 会监听它并完成当前关卡 |
 
 ## EnemyPawn 新增 API
 
@@ -176,12 +179,14 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 - 敌方回合开始时会先结算所有待结算远程攻击；已开火的远程敌人本回合不会再执行普通行动。
 - 友伤结果可通过 `OnFriendlyFireResolved()` 给蓝图表现层使用。
 - 敌人死亡会通过 `OnGridEnemyKilled` 通知敌人管理器，并由玩家控制器上的 `CombatCameraDirectorComponent` 短暂聚焦死亡地块。
+- 最后一名敌人死亡后，敌人管理器广播 `OnAllEnemiesCleared`，供 `ADungeonRunManager` 或蓝图 UI 触发胜利结算。
+- `ClearAllEnemies()` 可在关卡重新生成前销毁旧敌人 Actor，并清理它们占据的棋盘格。
 - 玩家失败时进入 `Defeat` 并停止后续敌人行动。
 
 当前未实现：
 
 - 敌人逐个行动动画队列；当前移动插值是并行播放。
-- 房间激活和跨房间追逐。
+- 房间激活和跨房间追逐的专用激活列表。
 - 跨阵营清除链的专用队列、连锁表现和 UI 提示。
 
 推荐后续扩展：

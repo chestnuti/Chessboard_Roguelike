@@ -7,11 +7,13 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Grid/GridManager.h"
+#include "HAL/PlatformTime.h"
 #include "PCG/DungeonGenerationSettings.h"
 #include "PCG/LSystemDungeonGenerator.h"
 #include "Pickup/GridPickupActor.h"
 #include "Pickup/GridPickupManager.h"
 #include "Player/GridPawn.h"
+#include "TimerManager.h"
 #include "Tutorial/TutorialLevelSet.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDungeonRunManager, Log, All);
@@ -27,7 +29,74 @@ void ADungeonRunManager::BeginPlay()
 
 	if (bGenerateOnBeginPlay)
 	{
-		GenerateAndInitializeRun();
+		StartLevel(CurrentDungeonLevel);
+	}
+}
+
+bool ADungeonRunManager::StartLevel(int32 LevelIndex)
+{
+	CurrentDungeonLevel = FMath::Max(1, LevelIndex);
+	RuntimeDungeonGenerationSettings = nullptr;
+	bCurrentLevelCompleted = false;
+
+	if (bAutoFindReferences)
+	{
+		ResolveRuntimeReferences();
+	}
+
+	ClearRuntimeActorsForLevelTransition();
+
+	if (GenerationMode == EDungeonRunGenerationMode::Procedural
+		&& (bUseLevelScaling || SeedMode == EDungeonRunSeedMode::RandomSeedPerLevelStart))
+	{
+		RuntimeDungeonGenerationSettings = BuildRuntimeSettingsForLevel(CurrentDungeonLevel);
+	}
+
+	const bool bStarted = GenerateAndInitializeRun();
+	if (bStarted)
+	{
+		BindEnemyClearEvent();
+		OnDungeonLevelStarted.Broadcast(CurrentDungeonLevel);
+
+		if (bSpawnEnemies && EnemyManager && EnemyManager->GetAliveEnemies().IsEmpty())
+		{
+			CompleteCurrentLevel();
+		}
+	}
+
+	return bStarted;
+}
+
+bool ADungeonRunManager::AdvanceToNextLevel()
+{
+	return StartLevel(CurrentDungeonLevel + 1);
+}
+
+void ADungeonRunManager::CompleteCurrentLevel()
+{
+	if (bCurrentLevelCompleted)
+	{
+		return;
+	}
+
+	bCurrentLevelCompleted = true;
+
+	if (TurnManager && TurnManager->CurrentTurnState != ETurnState::Defeat)
+	{
+		TurnManager->SetTurnState(ETurnState::Victory);
+	}
+
+	OnDungeonLevelCompleted.Broadcast(CurrentDungeonLevel, CurrentDungeonLevel + 1);
+
+	if (bAutoAdvanceToNextLevel && GetWorld())
+	{
+		FTimerHandle TimerHandle;
+		GetWorld()->GetTimerManager().SetTimer(
+			TimerHandle,
+			this,
+			&ADungeonRunManager::AdvanceToNextLevelFromTimer,
+			AutoAdvanceDelay,
+			false);
 	}
 }
 
@@ -54,13 +123,21 @@ bool ADungeonRunManager::GenerateAndInitializeRun()
 	}
 	else
 	{
-		if (!DungeonGenerationSettings)
+		if (!RuntimeDungeonGenerationSettings
+			&& (bUseLevelScaling || SeedMode == EDungeonRunSeedMode::RandomSeedPerLevelStart))
+		{
+			RuntimeDungeonGenerationSettings = BuildRuntimeSettingsForLevel(CurrentDungeonLevel);
+		}
+
+		const UDungeonGenerationSettings* ActiveSettings = GetActiveDungeonGenerationSettings();
+		if (!ActiveSettings)
 		{
 			UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateAndInitializeRun failed: DungeonGenerationSettings is not assigned."));
 			return false;
 		}
 
-		if (!ULSystemDungeonGenerator::GenerateDungeonLayout(DungeonGenerationSettings, LastGeneratedLayout))
+		CurrentRunSeed = ActiveSettings->Seed;
+		if (!ULSystemDungeonGenerator::GenerateDungeonLayout(ActiveSettings, LastGeneratedLayout))
 		{
 			UE_LOG(LogDungeonRunManager, Warning, TEXT("GenerateAndInitializeRun failed: layout generation failed."));
 			return false;
@@ -384,13 +461,14 @@ bool ADungeonRunManager::InitializePlayerFromLayout()
 
 void ADungeonRunManager::SpawnEnemiesFromLayout()
 {
-	if (!DungeonGenerationSettings || !GridManager || !GetWorld())
+	const UDungeonGenerationSettings* ActiveSettings = GetActiveDungeonGenerationSettings();
+	if (!ActiveSettings || !GridManager || !GetWorld())
 	{
 		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnEnemiesFromLayout skipped: DungeonGenerationSettings, GridManager, or World is missing."));
 		return;
 	}
 
-	if (DungeonGenerationSettings->EnemySpawnPool.IsEmpty())
+	if (ActiveSettings->EnemySpawnPool.IsEmpty())
 	{
 		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnEnemiesFromLayout skipped: EnemySpawnPool is empty."));
 		return;
@@ -398,7 +476,7 @@ void ADungeonRunManager::SpawnEnemiesFromLayout()
 
 	// Use a layout-derived stream so enemy class selection remains deterministic for a generated map.
 	FRandomStream SpawnStream(LastGeneratedLayout.Seed + 7919);
-	const int32 EnemyCount = DungeonGenerationSettings->EnemySpawnCount;
+	const int32 EnemyCount = ActiveSettings->EnemySpawnCount;
 	const int32 SpawnCount = FMath::Min(EnemyCount, LastGeneratedLayout.EnemySpawnCandidates.Num());
 
 	for (int32 Index = 0; Index < SpawnCount; ++Index)
@@ -442,7 +520,8 @@ void ADungeonRunManager::SpawnEnemiesFromLayout()
 
 void ADungeonRunManager::SpawnPickupsFromLayout()
 {
-	if (!DungeonGenerationSettings || !GridManager || !GetWorld())
+	const UDungeonGenerationSettings* ActiveSettings = GetActiveDungeonGenerationSettings();
+	if (!ActiveSettings || !GridManager || !GetWorld())
 	{
 		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnPickupsFromLayout skipped: DungeonGenerationSettings, GridManager, or World is missing."));
 		return;
@@ -457,14 +536,14 @@ void ADungeonRunManager::SpawnPickupsFromLayout()
 
 	ResolvedPickupManager->ClearAllPickups();
 
-	if (DungeonGenerationSettings->PickupSpawnPool.IsEmpty())
+	if (ActiveSettings->PickupSpawnPool.IsEmpty())
 	{
 		UE_LOG(LogDungeonRunManager, Verbose, TEXT("SpawnPickupsFromLayout skipped: PickupSpawnPool is empty."));
 		return;
 	}
 
 	FRandomStream SpawnStream(LastGeneratedLayout.Seed + 15485863);
-	const int32 TargetSpawnCount = FMath::Min(DungeonGenerationSettings->PickupSpawnCount, LastGeneratedLayout.RewardSpawnCandidates.Num());
+	const int32 TargetSpawnCount = FMath::Min(ActiveSettings->PickupSpawnCount, LastGeneratedLayout.RewardSpawnCandidates.Num());
 	int32 SpawnedCount = 0;
 
 	for (int32 Index = 0; Index < LastGeneratedLayout.RewardSpawnCandidates.Num() && SpawnedCount < TargetSpawnCount; ++Index)
@@ -515,18 +594,110 @@ void ADungeonRunManager::SpawnPickupsFromLayout()
 	}
 }
 
-const FDungeonEnemySpawnEntry* ADungeonRunManager::SelectEnemySpawnEntryForCandidate(
-	const FDungeonSpawnCandidate& Candidate,
-	FRandomStream& Stream) const
+void ADungeonRunManager::ClearRuntimeActorsForLevelTransition()
+{
+	if (EnemyManager)
+	{
+		EnemyManager->OnAllEnemiesCleared.RemoveDynamic(this, &ADungeonRunManager::CompleteCurrentLevel);
+		EnemyManager->ClearAllEnemies();
+	}
+
+	if (PickupManager)
+	{
+		PickupManager->ClearAllPickups();
+	}
+}
+
+void ADungeonRunManager::BindEnemyClearEvent()
+{
+	if (!EnemyManager)
+	{
+		return;
+	}
+
+	EnemyManager->OnAllEnemiesCleared.RemoveDynamic(this, &ADungeonRunManager::CompleteCurrentLevel);
+	EnemyManager->OnAllEnemiesCleared.AddDynamic(this, &ADungeonRunManager::CompleteCurrentLevel);
+}
+
+void ADungeonRunManager::AdvanceToNextLevelFromTimer()
+{
+	AdvanceToNextLevel();
+}
+
+UDungeonGenerationSettings* ADungeonRunManager::BuildRuntimeSettingsForLevel(int32 LevelIndex)
 {
 	if (!DungeonGenerationSettings)
 	{
 		return nullptr;
 	}
 
+	UDungeonGenerationSettings* RuntimeSettings = DuplicateObject<UDungeonGenerationSettings>(DungeonGenerationSettings, this);
+	if (!RuntimeSettings)
+	{
+		return nullptr;
+	}
+
+	const int32 ClampedLevel = FMath::Max(1, LevelIndex);
+	if (bUseLevelScaling)
+	{
+		const int32 TargetRooms = FMath::Max(1, ClampedLevel * FMath::Max(1, DungeonGenerationSettings->LevelScaling.RoomsPerLevel));
+		RuntimeSettings->MaxRoomCount = TargetRooms;
+		RuntimeSettings->TargetRoomCount = DungeonGenerationSettings->LevelScaling.bRequireExactRoomCount ? TargetRooms : 0;
+		RuntimeSettings->EnemySpawnCount = FMath::Max(
+			0,
+			DungeonGenerationSettings->LevelScaling.BaseEnemyCount
+			+ (ClampedLevel - 1) * DungeonGenerationSettings->LevelScaling.EnemyCountPerLevel);
+		RuntimeSettings->PickupSpawnCount = FMath::Max(
+			0,
+			DungeonGenerationSettings->LevelScaling.BasePickupCount
+			+ (ClampedLevel - 1) * DungeonGenerationSettings->LevelScaling.PickupCountPerLevel);
+		RuntimeSettings->RewardCandidateCount = FMath::Max(RuntimeSettings->RewardCandidateCount, RuntimeSettings->PickupSpawnCount);
+	}
+
+	RuntimeSettings->Seed = ResolveSeedForLevel(ClampedLevel);
+	CurrentRunSeed = RuntimeSettings->Seed;
+
+	return RuntimeSettings;
+}
+
+const UDungeonGenerationSettings* ADungeonRunManager::GetActiveDungeonGenerationSettings() const
+{
+	return RuntimeDungeonGenerationSettings ? RuntimeDungeonGenerationSettings.Get() : DungeonGenerationSettings.Get();
+}
+
+int32 ADungeonRunManager::ResolveSeedForLevel(int32 LevelIndex) const
+{
+	if (SeedMode == EDungeonRunSeedMode::RandomSeedPerLevelStart)
+	{
+		return GenerateRandomDungeonSeed();
+	}
+
+	const int32 BaseSeed = DungeonGenerationSettings ? DungeonGenerationSettings->Seed : 0;
+	return BaseSeed + FMath::Max(1, LevelIndex) * 1009;
+}
+
+int32 ADungeonRunManager::GenerateRandomDungeonSeed() const
+{
+	const uint64 Cycles = FPlatformTime::Cycles64();
+	const uint64 ObjectId = static_cast<uint64>(GetUniqueID());
+	const uint64 RandValue = static_cast<uint64>(FMath::Rand());
+	const uint64 MixedSeed = Cycles ^ (ObjectId << 32) ^ (RandValue << 16);
+	return FMath::Max(1, static_cast<int32>(MixedSeed & 0x7fffffff));
+}
+
+const FDungeonEnemySpawnEntry* ADungeonRunManager::SelectEnemySpawnEntryForCandidate(
+	const FDungeonSpawnCandidate& Candidate,
+	FRandomStream& Stream) const
+{
+	const UDungeonGenerationSettings* ActiveSettings = GetActiveDungeonGenerationSettings();
+	if (!ActiveSettings)
+	{
+		return nullptr;
+	}
+
 	// First pass gathers the total weight only from entries valid for this candidate depth.
 	int32 TotalWeight = 0;
-	for (const FDungeonEnemySpawnEntry& Entry : DungeonGenerationSettings->EnemySpawnPool)
+	for (const FDungeonEnemySpawnEntry& Entry : ActiveSettings->EnemySpawnPool)
 	{
 		if (!Entry.EnemyClass || Entry.Weight <= 0)
 		{
@@ -548,7 +719,7 @@ const FDungeonEnemySpawnEntry* ADungeonRunManager::SelectEnemySpawnEntryForCandi
 
 	int32 Roll = Stream.RandRange(1, TotalWeight);
 	// Second pass consumes the weighted roll and returns the selected class.
-	for (const FDungeonEnemySpawnEntry& Entry : DungeonGenerationSettings->EnemySpawnPool)
+	for (const FDungeonEnemySpawnEntry& Entry : ActiveSettings->EnemySpawnPool)
 	{
 		if (!Entry.EnemyClass || Entry.Weight <= 0)
 		{
@@ -574,13 +745,14 @@ const FDungeonPickupSpawnEntry* ADungeonRunManager::SelectPickupSpawnEntryForCan
 	const FDungeonSpawnCandidate& Candidate,
 	FRandomStream& Stream) const
 {
-	if (!DungeonGenerationSettings)
+	const UDungeonGenerationSettings* ActiveSettings = GetActiveDungeonGenerationSettings();
+	if (!ActiveSettings)
 	{
 		return nullptr;
 	}
 
 	int32 TotalWeight = 0;
-	for (const FDungeonPickupSpawnEntry& Entry : DungeonGenerationSettings->PickupSpawnPool)
+	for (const FDungeonPickupSpawnEntry& Entry : ActiveSettings->PickupSpawnPool)
 	{
 		if (!Entry.PickupClass || Entry.Weight <= 0)
 		{
@@ -601,7 +773,7 @@ const FDungeonPickupSpawnEntry* ADungeonRunManager::SelectPickupSpawnEntryForCan
 	}
 
 	int32 Roll = Stream.RandRange(1, TotalWeight);
-	for (const FDungeonPickupSpawnEntry& Entry : DungeonGenerationSettings->PickupSpawnPool)
+	for (const FDungeonPickupSpawnEntry& Entry : ActiveSettings->PickupSpawnPool)
 	{
 		if (!Entry.PickupClass || Entry.Weight <= 0)
 		{

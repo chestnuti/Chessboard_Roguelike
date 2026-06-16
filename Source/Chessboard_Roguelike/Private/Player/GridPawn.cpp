@@ -642,6 +642,11 @@ void AGridPawn::ResolvePostPlayerActionTurn()
 		return;
 	}
 
+	if (TurnManager->CurrentTurnState == ETurnState::Victory || TurnManager->CurrentTurnState == ETurnState::Defeat)
+	{
+		return;
+	}
+
 	FindEnemyManagerIfNeeded();
 	if (!EnemyManager)
 	{
@@ -655,6 +660,10 @@ void AGridPawn::ResolvePostPlayerActionTurn()
 
 	TurnManager->BeginEnemyTurn();
 	EnemyManager->ExecuteEnemyTurn();
+	if (TurnManager->CurrentTurnState == ETurnState::Victory || TurnManager->CurrentTurnState == ETurnState::Defeat)
+	{
+		return;
+	}
 	if (!EnemyManager->ShouldDelayEnemyTurnEnd())
 	{
 		TurnManager->EndEnemyTurn();

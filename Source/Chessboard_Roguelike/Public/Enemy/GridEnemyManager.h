@@ -9,6 +9,8 @@ class AGridManager;
 class AGridPawn;
 class ATurnManager;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAllEnemiesCleared);
+
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API AGridEnemyManager : public AActor
 {
@@ -33,6 +35,9 @@ public:
 	void RebuildEnemyList();
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void ClearAllEnemies();
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	void ExecuteEnemyTurn();
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy")
@@ -52,6 +57,9 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Player")
 	TObjectPtr<AGridPawn> PlayerPawn;
+
+	UPROPERTY(BlueprintAssignable, Category = "Enemy")
+	FOnAllEnemiesCleared OnAllEnemiesCleared;
 
 private:
 	UFUNCTION()

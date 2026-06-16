@@ -8,6 +8,30 @@ class AGridEnemyPawn;
 class AGridPickupActor;
 
 USTRUCT(BlueprintType)
+struct CHESSBOARD_ROGUELIKE_API FDungeonLevelScalingSettings
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Progression", meta = (ClampMin = "1"))
+	int32 RoomsPerLevel = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Progression", meta = (ClampMin = "0"))
+	int32 BaseEnemyCount = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Progression", meta = (ClampMin = "0"))
+	int32 EnemyCountPerLevel = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Progression", meta = (ClampMin = "0"))
+	int32 BasePickupCount = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Progression", meta = (ClampMin = "0"))
+	int32 PickupCountPerLevel = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PCG|Progression")
+	bool bRequireExactRoomCount = true;
+};
+
+USTRUCT(BlueprintType)
 struct CHESSBOARD_ROGUELIKE_API FDungeonEnemySpawnEntry
 {
 	GENERATED_BODY()
@@ -93,6 +117,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Rooms", meta = (ClampMin = "1"))
 	int32 MaxRoomCount = 16;
 
+	// Optional exact room target. 0 keeps the generator's current "up to MaxRoomCount" behavior.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Rooms", meta = (ClampMin = "0"))
+	int32 TargetRoomCount = 0;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Rooms", meta = (ClampMin = "0"))
 	int32 BoundaryNoise = 2;
 
@@ -137,4 +165,7 @@ public:
 	// Runtime spawning consumes reward candidates and selects concrete pickup classes from this pool.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Spawns")
 	TArray<FDungeonPickupSpawnEntry> PickupSpawnPool;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Progression")
+	FDungeonLevelScalingSettings LevelScaling;
 };

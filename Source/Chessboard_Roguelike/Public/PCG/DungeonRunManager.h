@@ -18,11 +18,21 @@ struct FDungeonEnemySpawnEntry;
 struct FDungeonPickupSpawnEntry;
 struct FTutorialLevelDefinition;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDungeonLevelStarted, int32, LevelIndex);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDungeonLevelCompleted, int32, CompletedLevelIndex, int32, NextLevelIndex);
+
 UENUM(BlueprintType)
 enum class EDungeonRunGenerationMode : uint8
 {
 	Procedural UMETA(DisplayName = "Procedural"),
 	TutorialFixed UMETA(DisplayName = "Tutorial Fixed")
+};
+
+UENUM(BlueprintType)
+enum class EDungeonRunSeedMode : uint8
+{
+	ConfiguredSeed UMETA(DisplayName = "Configured Seed"),
+	RandomSeedPerLevelStart UMETA(DisplayName = "Random Seed Per Level Start")
 };
 
 UCLASS(Blueprintable)
@@ -37,6 +47,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
 	TObjectPtr<UDungeonGenerationSettings> DungeonGenerationSettings;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "PCG|Dungeon")
+	TObjectPtr<UDungeonGenerationSettings> RuntimeDungeonGenerationSettings;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
 	EDungeonRunGenerationMode GenerationMode = EDungeonRunGenerationMode::Procedural;
@@ -65,6 +78,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
 	bool bSpawnPickups = false;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dungeon|Progression", meta = (ClampMin = "1"))
+	int32 CurrentDungeonLevel = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dungeon|Progression")
+	bool bUseLevelScaling = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dungeon|Seed")
+	EDungeonRunSeedMode SeedMode = EDungeonRunSeedMode::RandomSeedPerLevelStart;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Dungeon|Seed")
+	int32 CurrentRunSeed = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dungeon|Progression")
+	bool bAutoAdvanceToNextLevel = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dungeon|Progression", meta = (ClampMin = "0.0"))
+	float AutoAdvanceDelay = 1.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "PCG|Dungeon")
 	TObjectPtr<AGridManager> GridManager;
 
@@ -83,6 +114,21 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "PCG|Dungeon")
 	FGeneratedDungeonLayout LastGeneratedLayout;
 
+	UPROPERTY(BlueprintAssignable, Category = "Dungeon|Progression")
+	FOnDungeonLevelStarted OnDungeonLevelStarted;
+
+	UPROPERTY(BlueprintAssignable, Category = "Dungeon|Progression")
+	FOnDungeonLevelCompleted OnDungeonLevelCompleted;
+
+	UFUNCTION(BlueprintCallable, Category = "Dungeon|Progression")
+	bool StartLevel(int32 LevelIndex);
+
+	UFUNCTION(BlueprintCallable, Category = "Dungeon|Progression")
+	bool AdvanceToNextLevel();
+
+	UFUNCTION(BlueprintCallable, Category = "Dungeon|Progression")
+	void CompleteCurrentLevel();
+
 	// Generates a layout, applies it to the grid, then initializes actors that depend on the generated coordinates.
 	UFUNCTION(BlueprintCallable, Category = "PCG|Dungeon")
 	bool GenerateAndInitializeRun();
@@ -100,6 +146,13 @@ private:
 	bool InitializePlayerFromLayout();
 	void SpawnEnemiesFromLayout();
 	void SpawnPickupsFromLayout();
+	void ClearRuntimeActorsForLevelTransition();
+	void BindEnemyClearEvent();
+	void AdvanceToNextLevelFromTimer();
+	UDungeonGenerationSettings* BuildRuntimeSettingsForLevel(int32 LevelIndex);
+	const UDungeonGenerationSettings* GetActiveDungeonGenerationSettings() const;
+	int32 ResolveSeedForLevel(int32 LevelIndex) const;
+	int32 GenerateRandomDungeonSeed() const;
 	const FDungeonEnemySpawnEntry* SelectEnemySpawnEntryForCandidate(const FDungeonSpawnCandidate& Candidate, FRandomStream& Stream) const;
 	const FDungeonPickupSpawnEntry* SelectPickupSpawnEntryForCandidate(const FDungeonSpawnCandidate& Candidate, FRandomStream& Stream) const;
 	int32 CalculateEnemyKillThresholdForCandidate(
@@ -108,4 +161,6 @@ private:
 		const FDungeonEnemySpawnEntry& SpawnEntry) const;
 	void RegisterEnemyWithManager(AGridEnemyPawn* Enemy) const;
 	AGridPickupManager* EnsurePickupManager();
+
+	bool bCurrentLevelCompleted = false;
 };

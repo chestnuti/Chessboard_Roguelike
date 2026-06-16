@@ -389,8 +389,7 @@ namespace
 
 		for (FLSystemDungeonRoomNode& Room : Layout.Rooms)
 		{
-			const EGridCellRole RoomRole = Room.RoomId == 0 ? EGridCellRole::Start : EGridCellRole::Room;
-			RasterizeRoom(Layout, Settings, Stream, Room, RoomRole);
+			RasterizeRoom(Layout, Settings, Stream, Room, EGridCellRole::Room);
 		}
 
 		for (FLSystemDungeonConnection& Connection : Layout.Connections)
@@ -434,11 +433,70 @@ namespace
 		return true;
 	}
 
+	bool IsAttributeTileEligible(const FGridTileLayoutData& Tile)
+	{
+		return Tile.bWalkable
+			&& Tile.bConvertible
+			&& Tile.CellRole != EGridCellRole::Wall
+			&& Tile.CellRole != EGridCellRole::Start
+			&& Tile.CellRole != EGridCellRole::Exit;
+	}
+
+	void EnsureAttributeTileCoverage(
+		const UDungeonGenerationSettings& Settings,
+		FRandomStream& Stream,
+		FGeneratedDungeonLayout& Layout,
+		bool bHasConstructTile,
+		bool bHasAcidTile)
+	{
+		TArray<int32> EligibleTileIndices;
+		for (int32 TileIndex = 0; TileIndex < Layout.Tiles.Num(); ++TileIndex)
+		{
+			if (IsAttributeTileEligible(Layout.Tiles[TileIndex]))
+			{
+				EligibleTileIndices.Add(TileIndex);
+			}
+		}
+
+		if (EligibleTileIndices.IsEmpty())
+		{
+			return;
+		}
+
+		if (!bHasConstructTile && Settings.ConstructTileChance > 0)
+		{
+			const int32 SelectedIndex = EligibleTileIndices[Stream.RandRange(0, EligibleTileIndices.Num() - 1)];
+			Layout.Tiles[SelectedIndex].TileType = ETileType::Construct;
+			bHasConstructTile = true;
+		}
+
+		if (!bHasAcidTile && Settings.AcidTileChance > 0)
+		{
+			int32 SelectedIndex = EligibleTileIndices[Stream.RandRange(0, EligibleTileIndices.Num() - 1)];
+			if (EligibleTileIndices.Num() > 1)
+			{
+				for (int32 Attempt = 0; Attempt < EligibleTileIndices.Num(); ++Attempt)
+				{
+					const int32 CandidateIndex = EligibleTileIndices[Stream.RandRange(0, EligibleTileIndices.Num() - 1)];
+					if (Layout.Tiles[CandidateIndex].TileType != ETileType::Construct)
+					{
+						SelectedIndex = CandidateIndex;
+						break;
+					}
+				}
+			}
+
+			Layout.Tiles[SelectedIndex].TileType = ETileType::Acid;
+		}
+	}
+
 	void AssignTileTypes(const UDungeonGenerationSettings& Settings, FRandomStream& Stream, FGeneratedDungeonLayout& Layout)
 	{
 		// Stage 3: assign gameplay resource types after map shape is final.
 		const int32 ConstructChance = FMath::Clamp(Settings.ConstructTileChance, 0, 100);
 		const int32 AcidChance = FMath::Clamp(Settings.AcidTileChance, 0, 100 - ConstructChance);
+		bool bHasConstructTile = false;
+		bool bHasAcidTile = false;
 
 		for (FGridTileLayoutData& Tile : Layout.Tiles)
 		{
@@ -459,7 +517,7 @@ namespace
 			if (Tile.CellRole == EGridCellRole::Exit)
 			{
 				Tile.TileType = ETileType::Minimal;
-				Tile.bConvertible = false;
+				Tile.bConvertible = true;
 				continue;
 			}
 
@@ -467,21 +525,25 @@ namespace
 			if (Roll < ConstructChance)
 			{
 				Tile.TileType = ETileType::Construct;
+				bHasConstructTile = true;
 			}
 			else if (Roll < ConstructChance + AcidChance)
 			{
 				Tile.TileType = ETileType::Acid;
+				bHasAcidTile = true;
 			}
 			else
 			{
 				Tile.TileType = ETileType::Minimal;
 			}
 		}
+
+		EnsureAttributeTileCoverage(Settings, Stream, Layout, bHasConstructTile, bHasAcidTile);
 	}
 
 	bool IsCandidateSafeFromStart(const FIntPoint& Coord, const UDungeonGenerationSettings& Settings, const FGeneratedDungeonLayout& Layout)
 	{
-		const int32 SafetyDistance = FMath::Max(Settings.StartSafetyRadius + 2, Settings.MaxRoomRadius);
+		const int32 SafetyDistance = Settings.StartSafetyRadius;
 		return FMath::Abs(Coord.X - Layout.StartCoord.X) + FMath::Abs(Coord.Y - Layout.StartCoord.Y) > SafetyDistance;
 	}
 
@@ -654,15 +716,17 @@ bool ULSystemDungeonGenerator::GenerateDungeonLayout(const UDungeonGenerationSet
 			BuildSpawnCandidates(*Settings, Stream, OutLayout);
 		}
 
-		if (bRasterized && ValidateConnectivity(OutLayout))
+		const bool bMatchesTargetRoomCount = Settings->TargetRoomCount <= 0
+			|| OutLayout.Rooms.Num() == Settings->TargetRoomCount;
+		if (bRasterized && bMatchesTargetRoomCount && ValidateConnectivity(OutLayout))
 		{
 			UE_LOG(LogLSystemDungeonGenerator, Log, TEXT("Generated dungeon layout: seed=%d rooms=%d connections=%d enemyCandidates=%d attempt=%d."),
 				OutLayout.Seed, OutLayout.Rooms.Num(), OutLayout.Connections.Num(), OutLayout.EnemySpawnCandidates.Num(), Attempt + 1);
 			return true;
 		}
 
-		UE_LOG(LogLSystemDungeonGenerator, Verbose, TEXT("Dungeon generation attempt failed: seed=%d attempt=%d rooms=%d."),
-			Settings->Seed, Attempt + 1, OutLayout.Rooms.Num());
+		UE_LOG(LogLSystemDungeonGenerator, Verbose, TEXT("Dungeon generation attempt failed: seed=%d attempt=%d rooms=%d targetRooms=%d."),
+			Settings->Seed, Attempt + 1, OutLayout.Rooms.Num(), Settings->TargetRoomCount);
 	}
 
 	UE_LOG(LogLSystemDungeonGenerator, Warning, TEXT("GenerateDungeonLayout failed: all attempts produced invalid connectivity. seed=%d attempts=%d."),

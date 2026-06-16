@@ -136,6 +136,30 @@ void AGridEnemyManager::RebuildEnemyList()
 		GetAliveEnemies().Num(), RegisteredEnemies.Num());
 }
 
+void AGridEnemyManager::ClearAllEnemies()
+{
+	bWaitingForEnemyMovement = false;
+	SetActorTickEnabled(false);
+
+	for (AGridEnemyPawn* Enemy : RegisteredEnemies)
+	{
+		if (!IsValid(Enemy))
+		{
+			continue;
+		}
+
+		Enemy->OnGridEnemyKilled.RemoveDynamic(this, &AGridEnemyManager::HandleEnemyKilled);
+		AGridManager* EnemyGridManager = Enemy->GridManager ? Enemy->GridManager.Get() : GridManager.Get();
+		if (EnemyGridManager)
+		{
+			EnemyGridManager->ClearOccupant(Enemy->CurrentGridCoord);
+		}
+		Enemy->Destroy();
+	}
+
+	RegisteredEnemies.Reset();
+}
+
 void AGridEnemyManager::ExecuteEnemyTurn()
 {
 	AutoInitializeReferences();
@@ -239,6 +263,12 @@ void AGridEnemyManager::HandleEnemyKilled(AGridEnemyPawn* Enemy, FIntPoint Death
 	if (PlayerPawn && PlayerPawn->ConversionEnergyComponent)
 	{
 		PlayerPawn->ConversionEnergyComponent->GrantConversionEnergy();
+	}
+
+	PruneInvalidEnemies();
+	if (GetAliveEnemies().IsEmpty())
+	{
+		OnAllEnemiesCleared.Broadcast();
 	}
 
 	AGridPlayerController* GridPlayerController = PlayerPawn

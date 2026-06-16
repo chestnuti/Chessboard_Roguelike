@@ -61,7 +61,7 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 3. 保持 `bAutoFindReferences = true`，或手动指定 `GridManager`、`TurnManager`、`PlayerPawn`、`EnemyManager`、`PickupManager`。
 4. 如果希望自动生成敌人，设置 `bSpawnEnemies = true`，并在 `DungeonGenerationSettings.EnemySpawnPool` 中配置敌人类型池。
 5. 如果希望自动生成拾取物，设置 `bSpawnPickups = true`，并在 `DungeonGenerationSettings.PickupSpawnPool` 中配置道具类型池。
-6. BeginPlay 时 `DungeonRunManager` 调用 `GenerateAndInitializeRun()`。
+6. BeginPlay 时 `DungeonRunManager` 调用 `StartLevel(CurrentDungeonLevel)`。
 7. `ULSystemDungeonGenerator` 生成 `FGeneratedDungeonLayout`。
 8. `GridManager->ApplyTileLayout(Layout.Tiles, Layout.Width, Layout.Height)` 应用生成结果。
 9. 玩家被初始化到 `Layout.StartCoord`。
@@ -72,12 +72,48 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 注意：
 
 - PCG 生成器只产出数据，不直接 Spawn Actor，也不直接修改 `GridManager.Tiles`。
+- `StartLevel()` 是常规 PCG 关卡推进的推荐入口；它会先清理上一关敌人和拾取物，再生成并初始化新关卡。
+- `GenerateAndInitializeRun()` 仍可用于单次初始化，但不会主动执行关卡推进前的运行时 Actor 清理。
 - `ADungeonRunManager` 会在运行开始前关闭玩家的自动网格初始化，避免玩家先占用手工起点。
 - 敌人使用 deferred spawn，并在生成前关闭 `bAutoInitializeOnBeginPlay`，避免敌人先占用默认 `StartGridCoord`。
 - 敌人类型不在 `DungeonRunManager` 上单独配置，而是从 `UDungeonGenerationSettings.EnemySpawnPool` 中按权重和深度筛选；池条目还可以按候选点深度调整敌人的 `KillThreshold`。
 - 拾取物不写入 `GridManager.Tiles` 的 `OccupantType`，由 `AGridPickupManager` 单独按坐标维护，因此不会阻挡玩家进入该格。
 - 拾取物类型不在 `DungeonRunManager` 上单独配置，而是从 `UDungeonGenerationSettings.PickupSpawnPool` 中按权重和深度筛选。
+- 杀死本关所有敌人后，`AGridEnemyManager` 广播 `OnAllEnemiesCleared`，`ADungeonRunManager` 会把回合状态切到 `Victory` 并广播 `OnDungeonLevelCompleted`。
 - 当前 PCG 不依赖 UE PCG 插件；UE PCG Graph 后续更适合用于墙体、装饰和场景资产散布。
+
+## 关卡推进配置
+
+`ADungeonRunManager` 支持常规 PCG 关卡的多关推进。
+
+核心字段：
+
+- `CurrentDungeonLevel`: 当前关卡编号，默认 `1`。
+- `bUseLevelScaling`: 是否根据当前关卡动态派生 PCG 参数。
+- `SeedMode`: 生成种子模式。默认 `RandomSeedPerLevelStart`，每次开始关卡都会生成不同种子；切到 `ConfiguredSeed` 时使用可复现种子。
+- `CurrentRunSeed`: 本次关卡实际使用的种子，供调试、日志和复现记录使用。
+- `bAutoAdvanceToNextLevel`: 胜利后是否自动进入下一关。
+- `AutoAdvanceDelay`: 自动进入下一关前等待的秒数。
+- `OnDungeonLevelStarted`: 关卡开始事件。
+- `OnDungeonLevelCompleted`: 关卡完成事件，参数为已完成关卡和下一关编号。
+
+常用函数：
+
+- `StartLevel(LevelIndex)`: 开始指定关卡，并清理上一关运行时敌人和拾取物。
+- `AdvanceToNextLevel()`: 进入下一关。
+- `CompleteCurrentLevel()`: 标记本关完成，设置 `Victory` 并广播完成事件。
+
+推荐配置：
+
+1. 在 `BP_DungeonRunManager` 上设置 `GenerationMode = Procedural`。
+2. 设置 `bGenerateOnBeginPlay = true`。
+3. 设置 `bSpawnEnemies = true`。
+4. 需要道具时设置 `bSpawnPickups = true`。
+5. 设置 `bUseLevelScaling = true`。
+6. 在 `DungeonGenerationSettings.LevelScaling` 中配置每关房间、敌人和拾取物增长。
+7. 保持 `SeedMode = RandomSeedPerLevelStart` 可让每次开始都使用不同地图；需要复现同一地图时切换为 `ConfiguredSeed` 并记录 `CurrentRunSeed` / DataAsset `Seed`。
+
+如果希望玩家点击按钮进入下一关，让 UI 监听 `OnDungeonLevelCompleted`，显示胜利面板，并在按钮点击时调用 `AdvanceToNextLevel()`。如果希望自动推进，设置 `bAutoAdvanceToNextLevel = true`。
 
 ## GridSettings 配置
 
@@ -135,8 +171,8 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `Room`: 房间地面。
 - `Corridor`: 走廊地面。
 - `Wall`: 墙或不可通行边界。
-- `Start`: 起点区域。PCG 生成时保持 `Minimal`，且允许被地块转换能量转换。
-- `Exit`: 出口或目标区域。PCG 生成时保持 `Minimal`，但不允许被地块转换能量转换。
+- `Start`: 出生安全区。PCG 生成时只覆盖 `StartSafetyRadius` 范围内的格子，保持 `Minimal`，且允许被地块转换能量转换；起始房间安全区外仍为 `Room`，可参与属性地块分配和敌人/奖励候选生成。
+- `Exit`: 出口或目标区域。PCG 生成时保持 `Minimal`，且允许被地块转换能量转换。
 
 占据类型 `EGridOccupantType`：
 
@@ -196,13 +232,14 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 
 核心参数：
 
-- `Seed`: 地牢生成种子。
+- `Seed`: 地牢生成基础种子。`DungeonRunManager.SeedMode = ConfiguredSeed` 时用于复现地图；默认随机种子模式下不会直接作为本关实际种子。
 - `Width` / `Height`: 生成布局尺寸。
 - `Axiom`: L-System 初始字符串。
 - `Iterations`: L-System 展开次数。
 - `ProductionRules`: L-System 生产规则，键为单字符名称，例如 `F`。
 - `MinRoomRadius` / `MaxRoomRadius`: 房间半径范围。
 - `MaxRoomCount`: 最大房间数量。
+- `TargetRoomCount`: 精确目标房间数。`0` 表示不要求精确数量；大于 `0` 时，生成结果必须等于该房间数，否则本次尝试失败并重试。
 - `BoundaryNoise`: 房间不规则边界扰动强度。
 - `RoomSeparation`: 房间放置时额外保留的中心距离间隔，用于减少不同房间重叠。
 - `CorridorWidth`: 走廊宽度。
@@ -217,6 +254,24 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `RewardCandidateCount`: 奖励候选生成数量。
 - `PickupSpawnCount`: 运行时最多生成的拾取物数量。
 - `PickupSpawnPool`: 拾取物类型池。每项包含 `PickupClass`、`Weight`、`MinDepth` 和 `MaxDepth`，运行时会按奖励候选点深度筛选并按权重随机选择。
+- `LevelScaling`: 关卡推进缩放配置。
+
+`LevelScaling` 参数：
+
+- `RoomsPerLevel`: 每关增加的目标房间数。默认 `1` 时，第 1 关目标 1 房间，第 2 关目标 2 房间。
+- `BaseEnemyCount`: 第 1 关基础敌人数。
+- `EnemyCountPerLevel`: 每升一关增加的敌人数。
+- `BasePickupCount`: 第 1 关基础拾取物数。
+- `PickupCountPerLevel`: 每升一关增加的拾取物数。
+- `bRequireExactRoomCount`: 是否要求 PCG 精确生成目标房间数。开启后会写入运行时 `TargetRoomCount`。
+
+`ADungeonRunManager` 不会直接修改 `DungeonGenerationSettings` 资产本体。开启 `bUseLevelScaling` 或随机种子模式时，它会复制出 `RuntimeDungeonGenerationSettings`，并按当前关卡覆盖 `MaxRoomCount`、`TargetRoomCount`、`EnemySpawnCount`、`PickupSpawnCount`、`RewardCandidateCount` 和 `Seed`。
+
+种子模式：
+
+- `RandomSeedPerLevelStart`: 每次 `StartLevel()` 或直接 `GenerateAndInitializeRun()` 时生成新的运行时 seed，并写入 `RuntimeDungeonGenerationSettings.Seed`。这是默认模式。
+- `ConfiguredSeed`: 使用配置种子。开启关卡缩放时，运行时 seed 为 `DungeonGenerationSettings.Seed + CurrentDungeonLevel * 1009`；关闭关卡缩放且不创建运行时设置时，直接使用 DataAsset 的 `Seed`。
+- `CurrentRunSeed`: 保存本次实际使用的 seed。若发现某张地图需要复现，先记录该值，再切到固定种子模式或临时把 DataAsset `Seed` 调整为对应值。
 
 敌人池条目的 HP 阈值规则：
 
@@ -240,6 +295,7 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - 如果多次尝试后仍找不到合适位置，该房间节点会被跳过，不会强行夹回已有房间附近。
 - 栅格化时如果两个房间仍有局部重叠，Tile 会优先保留较低 `Depth` 的房间归属，避免深层房间污染起点附近区域。
 - 走廊仍可连接房间，但不会覆盖已有 `Room`、`Start`、`Exit` 的 `RegionId` 和 `Depth`。
+- 0 号房间不会整体标记为 `Start`；只有出生点周围的安全区会覆盖为 `Start`，避免第一关单房间失去属性地块和敌人候选。
 
 L-System 符号：
 
@@ -412,6 +468,9 @@ void AGridPlayerController::MoveRight()
 - `PlayerActionResolve`: 玩家行动结算中，输入锁定。
 - `EnemyTurnResolve`: 预留敌人回合。
 - `MapResolve`: 预留地图结算。
+- `CheckEndCondition`: 预留终局检查。
+- `Victory`: 胜利状态。常规 PCG 关卡中，击杀所有敌人后由 `ADungeonRunManager` 设置。
+- `Defeat`: 失败状态。玩家 HP 降至 `0` 后设置。
 
 变量：
 
@@ -632,14 +691,16 @@ void AGridPlayerController::MoveRight()
 - 基础回合输入锁。
 - 可选 Construct/Acid 地块属性效果。
 - 简单属性 HUD。
+- PCG 地图生成与可达性校验。
+- 敌人 AI、远程敌人、友伤和失败中断。
+- 拾取物生成与拾取结算。
+- 击杀所有敌人后的胜利判定。
+- 基于关卡编号的 PCG 房间数、敌人数和拾取物数缩放。
+- 下一关重新生成和运行时敌人/拾取物清理。
 
 未实现：
 
-- 敌人 AI。
-- 敌人移动。
-- 战斗和攻击。
-- 多房间。
-- PCG 地图。
 - 完整 HUD/美术表现。
+- 房间激活和跨房间追逐的专用激活列表。
 - 存档。
 - 联机同步。
