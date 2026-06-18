@@ -6,6 +6,7 @@
 #include "Enemy/GridEnemyPawn.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 #include "Grid/GridManager.h"
 #include "HAL/PlatformTime.h"
 #include "PCG/DungeonGenerationSettings.h"
@@ -13,6 +14,7 @@
 #include "Pickup/GridPickupActor.h"
 #include "Pickup/GridPickupManager.h"
 #include "Player/GridPawn.h"
+#include "Tutorial/TutorialFlowComponent.h"
 #include "TimerManager.h"
 #include "Tutorial/TutorialLevelSet.h"
 
@@ -272,6 +274,20 @@ bool ADungeonRunManager::GenerateTutorialRun()
 
 	SpawnTutorialEnemies(TutorialLevel);
 	SpawnTutorialPickups(TutorialLevel);
+
+	APlayerController* PlayerController = PlayerPawn ? Cast<APlayerController>(PlayerPawn->GetController()) : nullptr;
+	if (!PlayerController && GetWorld())
+	{
+		PlayerController = GetWorld()->GetFirstPlayerController();
+	}
+
+	if (PlayerController)
+	{
+		if (UTutorialFlowComponent* TutorialFlowComponent = PlayerController->FindComponentByClass<UTutorialFlowComponent>())
+		{
+			TutorialFlowComponent->StartTutorialFlow(TutorialLevel.TutorialFlow);
+		}
+	}
 	return true;
 }
 

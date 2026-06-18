@@ -1,6 +1,7 @@
 #include "Enemy/GridEnemyPawn.h"
 
 #include "Combat/CombatResolverComponent.h"
+#include "Combat/CombatPreviewReceiver.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
@@ -165,6 +166,26 @@ bool AGridEnemyPawn::IsSuppressedByPlayer(const AGridPawn* PlayerPawn) const
 	}
 
 	return AttributeComponent && AttributeComponent->CanSuppressFaction(Faction);
+}
+
+bool AGridEnemyPawn::CanAttackCoordNextTurn(FIntPoint TargetCoord, const AGridPawn* PlayerPawn) const
+{
+	if (!IsAlive() || !GridManager || !PlayerPawn || IsSuppressedByPlayer(PlayerPawn))
+	{
+		return false;
+	}
+
+	if (BehaviorType == EEnemyBehaviorType::Ranged)
+	{
+		FIntPoint AttackDirection = FIntPoint::ZeroValue;
+		TArray<FIntPoint> AttackTiles;
+		return TryGetAxisDirection(CurrentGridCoord, TargetCoord, AttackDirection)
+			&& BuildRangedLineFromCoord(CurrentGridCoord, AttackDirection, AttackTiles)
+			&& AttackTiles.Contains(TargetCoord);
+	}
+
+	const FIntPoint Delta = TargetCoord - CurrentGridCoord;
+	return FMath::Abs(Delta.X) + FMath::Abs(Delta.Y) == 1;
 }
 
 bool AGridEnemyPawn::TryMoveToGridCoord(FIntPoint TargetCoord)
@@ -653,6 +674,11 @@ void AGridEnemyPawn::Kill()
 	const FVector DeathWorldLocation = GridManager ? GridManager->GridToWorld(DeathCoord) : GetActorLocation();
 
 	bDead = true;
+	if (GetClass()->ImplementsInterface(UCombatPreviewReceiver::StaticClass()))
+	{
+		ICombatPreviewReceiver::Execute_UpdateCombatPreview(this, FCombatPreviewState());
+	}
+
 	OnGridEnemyKilled.Broadcast(this, DeathCoord, DeathWorldLocation);
 
 	SetActorHiddenInGame(true);

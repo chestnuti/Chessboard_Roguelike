@@ -12,7 +12,11 @@ class UInputMappingContext;
 class UCombatCameraDirectorComponent;
 class UMaterialParameterCollection;
 class UPlayerAttributeHUDWidget;
+class UTutorialFlowComponent;
 class UTransformWheelWidget;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTransformWheelOpened);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTransformSelectedForTutorial, UChessPieceFormData*, FormData);
 
 UENUM(BlueprintType)
 enum class EPlayerControlMode : uint8
@@ -36,6 +40,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCombatCameraDirectorComponent> CombatCameraDirectorComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UTutorialFlowComponent> TutorialFlowComponent;
 
 	UFUNCTION(BlueprintCallable, Category = "Combat Camera")
 	void FocusCombatCameraOnGridTile(const FVector& TargetWorldLocation);
@@ -69,6 +76,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Transform")
 	TArray<UChessPieceFormData*> GetTransformWheelForms() const;
+
+	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
+	FOnTransformWheelOpened OnTransformWheelOpened;
+
+	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
+	FOnTransformSelectedForTutorial OnTransformSelectedForTutorial;
 
 protected:
 	// Mapping context and actions are assigned in Blueprint/Data assets so bindings stay data-driven.

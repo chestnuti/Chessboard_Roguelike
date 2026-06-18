@@ -1,12 +1,12 @@
 # 教学关卡
 
-本模块记录固定教学关卡系统。教学关卡不使用 PCG 生成地图，而是通过 `UTutorialLevelSet` DataAsset 提供 10x10 固定地块布局、玩家出生点、固定敌人和固定拾取物配置。
+本模块记录固定教学关卡系统。教学关卡不使用 PCG 生成地图，而是通过 `UTutorialLevelSet` DataAsset 提供 10x10 固定地块布局、玩家出生点、固定敌人、固定拾取物和分步教学 UI 流程配置。
 
 ## 文档
 
 | 文档 | 说明 |
 | --- | --- |
-| [TutorialLevels_SystemGuide.md](TutorialLevels_SystemGuide.md) | 教学关卡系统说明，覆盖固定布局数据、DungeonRunManager 教学模式、6 个 Map 资产、DataAsset 配置、敌人/拾取物蓝图绑定和验证脚本。 |
+| [TutorialLevels_SystemGuide.md](TutorialLevels_SystemGuide.md) | 教学关卡系统说明，覆盖固定布局数据、DungeonRunManager 教学模式、6 个 Map 资产、DataAsset 配置、分步教学 UI、敌人/拾取物蓝图绑定和验证脚本。 |
 
 ## 相关模块
 

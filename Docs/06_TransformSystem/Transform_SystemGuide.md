@@ -304,3 +304,24 @@ IsHoverTile =
 - 鼠标点击格子不准：当前使用鼠标射线与玩家所在棋盘平面求交，不依赖地块碰撞；检查相机是否过于水平，或棋盘是否不在统一 Z 平面。
 - 目标选择时镜头不滚动：检查 `EdgeScrollZoneSize`、`EdgeScrollSpeed`，以及是否处于 `TransformTargeting` 状态。
 - 右键拖动误取消：增大 `RightMouseDragCancelThreshold`，或在蓝图拖动逻辑中调用拖动通知函数。
+
+## Combat Preview 接入
+
+变身目标选择阶段会复用战斗预览系统。进入 `TransformTargeting` 后，`AGridPlayerController` 会把 `PendingTransformTargets` 中的 `Capture` 目标交给 `AGridPawn::RefreshTransformCombatPreview()`：
+
+```cpp
+GridPawn->RefreshTransformCombatPreview(PendingTransformTargets, GridPawn->CurrentGridCoord);
+```
+
+当鼠标悬停在合法目标格上时，Controller 会把悬停格作为 `PreviewPlayerCoord` 再次刷新：
+
+```cpp
+GridPawn->RefreshTransformCombatPreview(PendingTransformTargets, HoverCoord);
+```
+
+这样敌人蓝图可以同时显示：
+
+- 该敌人是否会被当前变身形态击杀。
+- 如果玩家移动到悬停格，该敌人下一回合是否可以攻击玩家。
+
+敌人表现层通过 `ICombatPreviewReceiver::UpdateCombatPreview(FCombatPreviewState)` 接收状态。完整接口说明见 [Combat Preview 系统说明](../03_CombatAndEnemies/CombatPreview_SystemGuide.md)。

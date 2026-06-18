@@ -1,6 +1,8 @@
 #include "Player/GridPawn.h"
 
 #include "Combat/CombatResolverComponent.h"
+#include "Combat/CombatPreviewReceiver.h"
+#include "Combat/CombatPreviewTypes.h"
 #include "Combat/CombatTypes.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -233,6 +235,7 @@ bool AGridPawn::TryTransformMoveToCoord(FIntPoint TargetCoord, UChessPieceFormDa
 		return false;
 	}
 
+	const FIntPoint FromCoord = CurrentGridCoord;
 	const bool bAppliedVisualForThisMove = !bIsTransformVisualActive;
 	if (bAppliedVisualForThisMove)
 	{
@@ -249,6 +252,7 @@ bool AGridPawn::TryTransformMoveToCoord(FIntPoint TargetCoord, UChessPieceFormDa
 	}
 
 	bRestoreDefaultVisualOnMoveFinish = bIsTransformVisualActive;
+	OnGridPawnTransformMoveCompleted.Broadcast(FormData, FromCoord, TargetCoord);
 	return true;
 }
 
@@ -381,9 +385,12 @@ bool AGridPawn::TryResolveMoveOrAttackToCoord(FIntPoint TargetCoord)
 
 	const FVector FromLocation = GetActorLocation();
 	const FVector ToLocation = GridManager->GridToWorld(TargetCoord);
+	const FIntPoint FromCoord = CurrentGridCoord;
+	const ETileType EnteredTileType = TargetTileData.TileType;
 
 	TurnManager->BeginPlayerAction();
 	GridManager->ClearPlayerNextMoveTiles();
+	ClearCombatPreview();
 
 	if (!GridManager->RequestMove(this, CurrentGridCoord, TargetCoord))
 	{
@@ -401,6 +408,7 @@ bool AGridPawn::TryResolveMoveOrAttackToCoord(FIntPoint TargetCoord)
 		TileEffectResolverComponent->ResolveTileEnterEffect(this, CurrentGridCoord);
 	}
 	ResolvePickupAtCurrentTile();
+	OnGridPawnMoved.Broadcast(FromCoord, CurrentGridCoord, EnteredTileType);
 	TurnManager->AddStep();
 	StartVisualMove(FromLocation, ToLocation);
 	return true;
@@ -418,6 +426,7 @@ bool AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 
 	TurnManager->BeginPlayerAction();
 	GridManager->ClearPlayerNextMoveTiles();
+	ClearCombatPreview();
 
 	const FCombatResolveResult CombatResult = CombatResolverComponent
 		? CombatResolverComponent->ResolvePlayerMeleeAttack(this, EnemyActor)
@@ -426,6 +435,10 @@ bool AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 	if (CombatResult.bKilled)
 	{
 		const ETileType DroppedEnergyType = GetDroppedEnergyTypeForFaction(EnemyActor->Faction);
+		const FIntPoint FromCoord = CurrentGridCoord;
+		FTileData TargetTileData;
+		GridManager->GetTileData(TargetCoord, TargetTileData);
+		const ETileType EnteredTileType = TargetTileData.TileType;
 
 		EnemyActor->Kill();
 		GridManager->ClearOccupant(TargetCoord);
@@ -448,6 +461,8 @@ bool AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 		}
 		ResolvePickupAtCurrentTile();
 
+		OnGridPawnMoved.Broadcast(FromCoord, CurrentGridCoord, EnteredTileType);
+		OnGridPawnEnemyKilled.Broadcast(EnemyActor, TargetCoord, DroppedEnergyType);
 		OnPlayerKilledEnemy(EnemyActor, DroppedEnergyType);
 
 		TurnManager->AddStep();
@@ -678,6 +693,7 @@ bool AGridPawn::ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType E
 {
 	if (!InGridManager)
 	{
+		OnGridPawnConversionEnergyUsed.Broadcast(EnergyType, false);
 		return false;
 	}
 	const TArray<FIntPoint> AdjacentCoords = {
@@ -700,6 +716,7 @@ bool AGridPawn::ConvertAreaAroundPlayer(AGridManager* InGridManager, ETileType E
 			bConvertedAny = true;
 		}
 	}
+	OnGridPawnConversionEnergyUsed.Broadcast(EnergyType, bConvertedAny);
 	return bConvertedAny;
 }
 
@@ -769,4 +786,117 @@ void AGridPawn::RefreshPlayerNextMoveTiles()
 	}
 
 	GridManager->SetPlayerNextMoveTiles(MoveCoords);
+	RefreshDefaultCombatPreview();
+}
+
+void AGridPawn::RefreshCombatPreview(FIntPoint PreviewPlayerCoord)
+{
+	static const FIntPoint NeighborOffsets[] =
+	{
+		FIntPoint(1, 0),
+		FIntPoint(-1, 0),
+		FIntPoint(0, 1),
+		FIntPoint(0, -1)
+	};
+
+	TSet<FIntPoint> PlayerAttackCoords;
+	PlayerAttackCoords.Reserve(UE_ARRAY_COUNT(NeighborOffsets));
+	for (const FIntPoint& Offset : NeighborOffsets)
+	{
+		PlayerAttackCoords.Add(CurrentGridCoord + Offset);
+	}
+
+	ApplyCombatPreview(PlayerAttackCoords, PreviewPlayerCoord);
+}
+
+void AGridPawn::RefreshDefaultCombatPreview()
+{
+	RefreshCombatPreview(CurrentGridCoord);
+}
+
+void AGridPawn::RefreshTransformCombatPreview(const TArray<FTransformMoveTarget>& TransformTargets, FIntPoint PreviewPlayerCoord)
+{
+	TSet<FIntPoint> PlayerAttackCoords;
+	for (const FTransformMoveTarget& Target : TransformTargets)
+	{
+		if (Target.TargetType == ETransformTargetType::Capture)
+		{
+			PlayerAttackCoords.Add(Target.Coord);
+		}
+	}
+
+	ApplyCombatPreview(PlayerAttackCoords, PreviewPlayerCoord);
+}
+
+void AGridPawn::ClearCombatPreview()
+{
+	if (PreviewedCombatEnemies.IsEmpty())
+	{
+		return;
+	}
+
+	for (AGridEnemyPawn* Enemy : PreviewedCombatEnemies)
+	{
+		if (Enemy && Enemy->GetClass()->ImplementsInterface(UCombatPreviewReceiver::StaticClass()))
+		{
+			ICombatPreviewReceiver::Execute_UpdateCombatPreview(Enemy, FCombatPreviewState());
+		}
+	}
+
+	PreviewedCombatEnemies.Reset();
+}
+
+void AGridPawn::ApplyCombatPreview(const TSet<FIntPoint>& PlayerAttackCoords, FIntPoint PreviewPlayerCoord)
+{
+	ClearCombatPreview();
+
+	if (!GridManager || !CombatResolverComponent)
+	{
+		return;
+	}
+
+	FindEnemyManagerIfNeeded();
+
+	TArray<AGridEnemyPawn*> AliveEnemies;
+	if (EnemyManager)
+	{
+		AliveEnemies = EnemyManager->GetAliveEnemies();
+	}
+	else if (GetWorld())
+	{
+		for (TActorIterator<AGridEnemyPawn> It(GetWorld()); It; ++It)
+		{
+			AGridEnemyPawn* Enemy = *It;
+			if (Enemy && Enemy->IsAlive())
+			{
+				AliveEnemies.Add(Enemy);
+			}
+		}
+	}
+
+	for (AGridEnemyPawn* Enemy : AliveEnemies)
+	{
+		if (!Enemy || !Enemy->GetClass()->ImplementsInterface(UCombatPreviewReceiver::StaticClass()))
+		{
+			continue;
+		}
+
+		FCombatPreviewState PreviewState;
+		PreviewState.bCanAttackPreviewPlayerCoord = Enemy->CanAttackCoordNextTurn(PreviewPlayerCoord, this);
+
+		if (PlayerAttackCoords.Contains(Enemy->CurrentGridCoord))
+		{
+			PreviewState.bCanBeKilledByPlayer =
+				CombatResolverComponent->ResolvePlayerMeleeAttack(this, Enemy).bKilled;
+		}
+
+		PreviewState.bIsRelevant = PreviewState.bCanBeKilledByPlayer || PreviewState.bCanAttackPreviewPlayerCoord;
+		if (!PreviewState.bIsRelevant)
+		{
+			continue;
+		}
+
+		ICombatPreviewReceiver::Execute_UpdateCombatPreview(Enemy, PreviewState);
+		PreviewedCombatEnemies.AddUnique(Enemy);
+	}
 }

@@ -102,6 +102,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy|Suppression")
 	bool IsSuppressedByPlayer(const AGridPawn* PlayerPawn) const;
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Enemy|Preview")
+	bool CanAttackCoordNextTurn(FIntPoint TargetCoord, const AGridPawn* PlayerPawn) const;
+
 	UFUNCTION(BlueprintCallable, Category = "Enemy")
 	bool TryMoveToGridCoord(FIntPoint TargetCoord);
 

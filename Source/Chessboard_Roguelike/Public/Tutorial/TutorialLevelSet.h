@@ -8,6 +8,7 @@
 
 class AGridEnemyPawn;
 class AGridPickupActor;
+class UTutorialFlowDataAsset;
 
 USTRUCT(BlueprintType)
 struct CHESSBOARD_ROGUELIKE_API FTutorialEnemySpawnData
@@ -73,6 +74,9 @@ struct CHESSBOARD_ROGUELIKE_API FTutorialLevelDefinition
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial|Level")
 	TArray<FTutorialPickupSpawnData> Pickups;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tutorial|Level")
+	TObjectPtr<UTutorialFlowDataAsset> TutorialFlow;
 };
 
 UCLASS(BlueprintType)

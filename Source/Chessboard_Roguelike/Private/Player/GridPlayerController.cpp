@@ -14,6 +14,7 @@
 #include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
 #include "Player/PlayerTransformInventoryComponent.h"
+#include "Tutorial/TutorialFlowComponent.h"
 #include "UI/PlayerAttributeHUDWidget.h"
 #include "UI/TransformWheelWidget.h"
 #include "UObject/ConstructorHelpers.h"
@@ -25,6 +26,7 @@ AGridPlayerController::AGridPlayerController()
 	PrimaryActorTick.bCanEverTick = true;
 
 	CombatCameraDirectorComponent = CreateDefaultSubobject<UCombatCameraDirectorComponent>(TEXT("CombatCameraDirectorComponent"));
+	TutorialFlowComponent = CreateDefaultSubobject<UTutorialFlowComponent>(TEXT("TutorialFlowComponent"));
 
 	PlayerAttributeHUDClass = UPlayerAttributeHUDWidget::StaticClass();
 
@@ -244,6 +246,7 @@ void AGridPlayerController::HandleTransformWheelStarted()
 		InputMode.SetWidgetToFocus(TransformWheelWidget->TakeWidget());
 	}
 	SetInputMode(InputMode);
+	OnTransformWheelOpened.Broadcast();
 }
 
 void AGridPlayerController::HandleTransformWheelReleased()
@@ -425,6 +428,7 @@ void AGridPlayerController::RequestSelectTransform(UChessPieceFormData* FormData
 	}
 
 	ShowTransformTargetHighlights();
+	OnTransformSelectedForTutorial.Broadcast(FormData);
 
 	FInputModeGameAndUI InputMode;
 	InputMode.SetHideCursorDuringCapture(false);
@@ -503,6 +507,7 @@ void AGridPlayerController::ShowTransformTargetHighlights()
 	}
 
 	GridPawn->GridManager->SetPlayerNextMoveTiles(HighlightCoords);
+	GridPawn->RefreshTransformCombatPreview(PendingTransformTargets, GridPawn->CurrentGridCoord);
 }
 
 void AGridPlayerController::ClearTransformTargetHighlights()
@@ -513,6 +518,7 @@ void AGridPlayerController::ClearTransformTargetHighlights()
 		{
 			GridPawn->GridManager->ClearPlayerNextMoveTiles();
 		}
+		GridPawn->ClearCombatPreview();
 	}
 }
 
@@ -619,9 +625,21 @@ void AGridPlayerController::UpdateMouseHoverGridMaterialParameters()
 		return;
 	}
 
+	const auto RefreshTransformPreviewAtCurrentCoord = [this]()
+	{
+		if (ControlMode == EPlayerControlMode::TransformTargeting)
+		{
+			if (AGridPawn* GridPawn = GetGridPawn())
+			{
+				GridPawn->RefreshTransformCombatPreview(PendingTransformTargets, GridPawn->CurrentGridCoord);
+			}
+		}
+	};
+
 	if (bIsCameraDragging)
 	{
 		WriteMouseHoverGridMaterialParameters(FIntPoint::ZeroValue, false);
+		RefreshTransformPreviewAtCurrentCoord();
 		return;
 	}
 
@@ -629,16 +647,25 @@ void AGridPlayerController::UpdateMouseHoverGridMaterialParameters()
 	if (!TryGetGridCoordUnderMouse(HoverCoord))
 	{
 		WriteMouseHoverGridMaterialParameters(FIntPoint::ZeroValue, false);
+		RefreshTransformPreviewAtCurrentCoord();
 		return;
 	}
 
 	if (bMouseHoverRequiresPendingTransformTarget && !HasPendingTransformTarget(HoverCoord))
 	{
 		WriteMouseHoverGridMaterialParameters(HoverCoord, false);
+		RefreshTransformPreviewAtCurrentCoord();
 		return;
 	}
 
 	WriteMouseHoverGridMaterialParameters(HoverCoord, true);
+	if (ControlMode == EPlayerControlMode::TransformTargeting)
+	{
+		if (AGridPawn* GridPawn = GetGridPawn())
+		{
+			GridPawn->RefreshTransformCombatPreview(PendingTransformTargets, HoverCoord);
+		}
+	}
 }
 
 void AGridPlayerController::WriteMouseHoverGridMaterialParameters(const FIntPoint& HoverCoord, bool bHasHover)

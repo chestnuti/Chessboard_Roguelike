@@ -23,6 +23,10 @@ class UPlayerTransformInventoryComponent;
 class UTileEffectResolverComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTransformVisualStateChanged, UChessPieceFormData*, FormData, bool, bIsTransformed);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGridPawnMoved, FIntPoint, FromCoord, FIntPoint, ToCoord, ETileType, EnteredTileType);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGridPawnEnemyKilled, AGridEnemyPawn*, KilledEnemy, FIntPoint, DeathCoord, ETileType, DroppedEnergyType);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGridPawnConversionEnergyUsed, ETileType, EnergyType, bool, bConvertedAny);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGridPawnTransformMoveCompleted, UChessPieceFormData*, FormData, FIntPoint, FromCoord, FIntPoint, ToCoord);
 
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API AGridPawn : public APawn
@@ -95,6 +99,18 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Transform|Visual")
 	FOnTransformVisualStateChanged OnTransformVisualStateChanged;
 
+	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
+	FOnGridPawnMoved OnGridPawnMoved;
+
+	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
+	FOnGridPawnEnemyKilled OnGridPawnEnemyKilled;
+
+	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
+	FOnGridPawnConversionEnergyUsed OnGridPawnConversionEnergyUsed;
+
+	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
+	FOnGridPawnTransformMoveCompleted OnGridPawnTransformMoveCompleted;
+
 	UPROPERTY()
 	TObjectPtr<AGridManager> GridManager;
 
@@ -146,6 +162,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Grid|Visual")
 	void RefreshPlayerNextMoveTiles();
 
+	UFUNCTION(BlueprintCallable, Category = "Combat Preview")
+	void RefreshCombatPreview(FIntPoint PreviewPlayerCoord);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Preview")
+	void RefreshDefaultCombatPreview();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Preview")
+	void RefreshTransformCombatPreview(const TArray<FTransformMoveTarget>& TransformTargets, FIntPoint PreviewPlayerCoord);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat Preview")
+	void ClearCombatPreview();
+
 	// Visual-only movement; grid occupancy has already been updated before this starts.
 	void StartVisualMove(const FVector& From, const FVector& To);
 	void FinishVisualMove();
@@ -168,9 +196,13 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> DefaultPawnMaterial;
 
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AGridEnemyPawn>> PreviewedCombatEnemies;
+
 	bool TryResolveMoveOrAttackToCoord(FIntPoint TargetCoord);
 	bool ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* EnemyActor);
 	bool IsLegalTransformTarget(FIntPoint TargetCoord, UChessPieceFormData* FormData) const;
+	void ApplyCombatPreview(const TSet<FIntPoint>& PlayerAttackCoords, FIntPoint PreviewPlayerCoord);
 	void CacheDefaultPawnVisual();
 	void StartFailedAttackVisualMove(const FVector& From, const FVector& BlockedTarget);
 	void FindEnemyManagerIfNeeded();

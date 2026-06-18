@@ -5,7 +5,7 @@
 ## 目标
 
 - 每个教学关卡使用固定 `10 x 10` 棋盘。
-- 地块类型、玩家出生点、敌人坐标、敌人阵营、敌人行为类型、击杀阈值和固定拾取物全部由 DataAsset 固定配置。
+- 地块类型、玩家出生点、敌人坐标、敌人阵营、敌人行为类型、击杀阈值、固定拾取物和分步教学 UI 流程全部由 DataAsset 固定配置。
 - 运行时仍复用 `AGridManager`、`AGridPawn`、`AGridEnemyPawn`、`AGridEnemyManager`、`AGridPickupManager`、`ATurnManager` 和现有战斗/能量/拾取规则。
 - PCG 常规关卡路径保持默认不变。
 
@@ -14,6 +14,7 @@
 | 资产 | 用途 |
 | --- | --- |
 | `Content/Data/Tutorial/DA_TutorialLevelSet.uasset` | 6 个教学关卡的固定布局、固定敌人和固定拾取物配置 |
+| `Content/Data/Tutorial/UI/DA_TutorialFlow_01_TileAttributes.uasset` - `DA_TutorialFlow_06_HealthAndTransform.uasset` | 6 个教学关卡的分步 UI 文案和推进条件 |
 | `Content/Maps/Tutorial/L_Tutorial_01_TileAttributes.umap` | 教学 1：地块属性变化 |
 | `Content/Maps/Tutorial/L_Tutorial_02_EnemyKills.umap` | 教学 2：敌人击杀 |
 | `Content/Maps/Tutorial/L_Tutorial_03_ConversionEnergy.umap` | 教学 3：地块转换能量 |
@@ -58,6 +59,7 @@
 | `Tiles` | `TArray<FGridTileLayoutData>` | 100 个固定地块布局数据 |
 | `Enemies` | `TArray<FTutorialEnemySpawnData>` | 固定敌人生成列表 |
 | `Pickups` | `TArray<FTutorialPickupSpawnData>` | 固定拾取物生成列表 |
+| `TutorialFlow` | `UTutorialFlowDataAsset*` | 当前教学关卡启动后使用的分步 UI 流程 |
 
 ### FTutorialEnemySpawnData
 
@@ -100,7 +102,51 @@
 5. 调用 `InitializePlayerAtCoord(StartCoord)` 初始化玩家。
 6. `SpawnTutorialEnemies()` 使用 deferred spawn 生成固定敌人。
 7. `SpawnTutorialPickups()` 使用 deferred spawn 生成固定拾取物；没有配置拾取物的关卡会直接跳过。
-8. 初始化 `EnemyManager` 并将回合状态设置为 `PlayerInput`。
+8. `UTutorialFlowComponent::StartTutorialFlow()` 读取当前关卡的 `TutorialFlow`，显示分步教学 UI。
+9. 初始化 `EnemyManager` 并将回合状态设置为 `PlayerInput`。
+
+## 分步教学 UI
+
+教学 UI 使用原生 UMG Widget 和数据驱动流程：
+
+| 类型 | 位置 | 说明 |
+| --- | --- | --- |
+| `UTutorialFlowDataAsset` | `Source/Chessboard_Roguelike/Public/Tutorial/TutorialFlowData.h` | 保存当前关卡的步骤文案和完成条件 |
+| `UTutorialFlowComponent` | `Source/Chessboard_Roguelike/Public/Tutorial/TutorialFlowComponent.h` | 挂在 `AGridPlayerController` 上，监听玩家、敌人、拾取物、格子、属性和能量事件并推进步骤 |
+| `UTutorialInstructionWidget` | `Source/Chessboard_Roguelike/Public/UI/TutorialInstructionWidget.h` | 屏幕左上角教学文字 Widget；若没有 Widget Blueprint，会使用原生 fallback 布局 |
+
+当前支持的步骤触发条件包括：
+
+| 触发条件 | 用途 |
+| --- | --- |
+| `PlayerSteppedOnTileType` | 玩家进入指定属性地块后推进 |
+| `PlayerSteppedOnAnyAttributeTile` | 玩家进入任意构成/酸性地块后推进 |
+| `AllAttributeTilesCleared` | 所有构成/酸性地块被清除后推进 |
+| `PlayerDamagedOrEnemyKilled` | 玩家受到伤害或击杀敌人后推进 |
+| `EnemyKilled` | 任意敌人死亡后推进 |
+| `AllEnemiesCleared` | 全部敌人清空后推进 |
+| `ConversionEnergyUsed` | 玩家成功使用地块转换能量后推进 |
+| `AttributeReached` | 任意或指定属性值达到阈值后推进 |
+| `TransformWheelOpened` | 玩家按 G 打开变身面板后推进 |
+| `TransformPieceCollectedCount` | 玩家收集指定数量变身棋子后推进 |
+| `TransformMoveCompleted` | 玩家完成一次变身移动后推进 |
+
+教学 UI 不切换输入模式，也不接管焦点；它只显示提示文字，输入仍由现有 WASD、E、空格和 G 变身系统处理。
+
+### 教学结束自动切关
+
+`UTutorialFlowDataAsset` 提供 `NextLevelName` 字段。当前 Flow 的最后一步完成后，`UTutorialFlowComponent` 会先广播 `OnTutorialFlowCompleted`，再关闭教学 UI；如果 `NextLevelName` 不是 `None`，会在 `NextLevelTravelDelay` 秒后调用 `UGameplayStatics::OpenLevel()` 进入下一张教学 Map。
+
+当前默认链路：
+
+| 当前关卡 | NextLevelName |
+| --- | --- |
+| `DA_TutorialFlow_01_TileAttributes` | `L_Tutorial_02_EnemyKills` |
+| `DA_TutorialFlow_02_EnemyKills` | `L_Tutorial_03_ConversionEnergy` |
+| `DA_TutorialFlow_03_ConversionEnergy` | `L_Tutorial_04_RangedFriendlyFire` |
+| `DA_TutorialFlow_04_RangedFriendlyFire` | `L_Tutorial_05_FactionSuppression` |
+| `DA_TutorialFlow_05_FactionSuppression` | `L_Tutorial_06_HealthAndTransform` |
+| `DA_TutorialFlow_06_HealthAndTransform` | `None` |
 
 ## 教学关卡内容
 
@@ -144,9 +190,11 @@
 | --- | --- |
 | `Tools/CreateTutorialAssets.py` | 创建或更新 `DA_TutorialLevelSet`，复制 5 张教学 Map |
 | `Tools/AddTutorialLevel06.py` | 只追加或更新第 6 关 DataAsset 条目，并创建/配置 `L_Tutorial_06_HealthAndTransform`，不会重建前 5 关 |
+| `Tools/CreateTutorialUIFlows.py` | 创建/更新 6 个教学 UI Flow DataAsset，并将其挂到 `DA_TutorialLevelSet.TutorialLevels[*].TutorialFlow` |
 | `Tools/ConfigureTutorialMap.py` | 打开当前 Map 后设置 `DungeonRunManager` 的教学模式、DataAsset 和索引 |
 | `Tools/ValidateTutorialMap.py` | 验证当前 Map 的 `DungeonRunManager` 教学配置 |
 | `Tools/ValidateTutorialDataAsset.py` | 验证 DataAsset 中存在第 6 关，并检查第 6 关 10x10 布局、起终点和拾取物蓝图绑定 |
+| `Tools/ValidateTutorialUIFlows.py` | 验证 6 个教学关卡都绑定了 UI Flow，步骤文案非空，且 NextLevelName 链路正确 |
 
 如果前 5 关已经在编辑器中手动调整，新增第 6 关时应使用 `Tools/AddTutorialLevel06.py`，不要重新运行 `Tools/CreateTutorialAssets.py`，以免批量脚本重建旧教学关卡资产。
 
