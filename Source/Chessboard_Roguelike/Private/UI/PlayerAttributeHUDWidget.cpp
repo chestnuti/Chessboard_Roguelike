@@ -1,16 +1,25 @@
 #include "UI/PlayerAttributeHUDWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/Image.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "GameFramework/Pawn.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
 
 namespace
 {
+constexpr float AcidEnemyTypeValue = 0.f;
+constexpr float ConstructEnemyTypeValue = 1.f;
+
+const FName EnemyTypeParameterName(TEXT("EnemyType"));
+const FName FullParameterName(TEXT("Full"));
+const FName OffsetXParameterName(TEXT("Offset_X"));
+
 FText GetConversionEnergyTypeDisplayName(ETileType EnergyType)
 {
 	switch (EnergyType)
@@ -117,6 +126,20 @@ void UPlayerAttributeHUDWidget::RefreshAttributeDisplay()
 	{
 		AcidProgressBar->SetPercent(AttributeComponent->GetAcidRatio());
 	}
+
+	ConstructAttributeMaterial = RefreshAttributeImage(
+		ConstructAttribute,
+		ConstructAttributeMaterial,
+		AttributeComponent->GetConstructValue(),
+		AttributeComponent->GetMaxConstructValue(),
+		ConstructEnemyTypeValue);
+
+	AcidAttributeMaterial = RefreshAttributeImage(
+		AcidAttribute,
+		AcidAttributeMaterial,
+		AttributeComponent->GetAcidValue(),
+		AttributeComponent->GetMaxAcidValue(),
+		AcidEnemyTypeValue);
 }
 
 void UPlayerAttributeHUDWidget::RefreshConversionEnergyDisplay()
@@ -266,4 +289,38 @@ void UPlayerAttributeHUDWidget::UnbindFromConversionEnergyComponent()
 		ConversionEnergyComponent->OnConversionEnergyChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleConversionEnergyChanged);
 		ConversionEnergyComponent = nullptr;
 	}
+}
+
+UMaterialInstanceDynamic* UPlayerAttributeHUDWidget::RefreshAttributeImage(
+	UImage* AttributeImage,
+	UMaterialInstanceDynamic* AttributeMaterial,
+	int32 AttributeValue,
+	int32 MaxAttributeValue,
+	float EnemyTypeValue)
+{
+	if (!AttributeImage)
+	{
+		return nullptr;
+	}
+
+	if (!AttributeMaterial)
+	{
+		AttributeMaterial = AttributeImage->GetDynamicMaterial();
+	}
+
+	if (!AttributeMaterial)
+	{
+		return nullptr;
+	}
+
+	const int32 SafeMaxAttributeValue = FMath::Max(MaxAttributeValue, 1);
+	const int32 ClampedAttributeValue = FMath::Clamp(AttributeValue, 0, SafeMaxAttributeValue);
+	const float bFullValue = ClampedAttributeValue >= SafeMaxAttributeValue ? 1.f : 0.f;
+	const float OffsetValue = static_cast<float>(FMath::Clamp(ClampedAttributeValue, 0, SafeMaxAttributeValue - 1));
+
+	AttributeMaterial->SetScalarParameterValue(EnemyTypeParameterName, EnemyTypeValue);
+	AttributeMaterial->SetScalarParameterValue(FullParameterName, bFullValue);
+	AttributeMaterial->SetScalarParameterValue(OffsetXParameterName, OffsetValue);
+
+	return AttributeMaterial;
 }

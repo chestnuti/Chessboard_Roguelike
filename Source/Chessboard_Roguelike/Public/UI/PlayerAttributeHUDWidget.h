@@ -6,6 +6,8 @@
 #include "PlayerAttributeHUDWidget.generated.h"
 
 class UConversionEnergyComponent;
+class UImage;
+class UMaterialInstanceDynamic;
 class UPlayerAttributeComponent;
 class UProgressBar;
 class UTextBlock;
@@ -58,6 +60,12 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Player Attributes")
 	TObjectPtr<UProgressBar> AcidProgressBar;
 
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Player Attributes")
+	TObjectPtr<UImage> ConstructAttribute;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Player Attributes")
+	TObjectPtr<UImage> AcidAttribute;
+
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Conversion Energy")
 	TObjectPtr<UTextBlock> EnergyText;
 
@@ -67,6 +75,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UConversionEnergyComponent> ConversionEnergyComponent;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> ConstructAttributeMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> AcidAttributeMaterial;
 
 	UFUNCTION()
 	void HandlePlayerAttributeChanged(int32 NewConstructValue, int32 NewAcidValue);
@@ -82,4 +96,5 @@ private:
 	void UnbindFromAttributeComponent();
 	void BindToConversionEnergyComponent(UConversionEnergyComponent* InEnergyComponent);
 	void UnbindFromConversionEnergyComponent();
+	UMaterialInstanceDynamic* RefreshAttributeImage(UImage* AttributeImage, UMaterialInstanceDynamic* AttributeMaterial, int32 AttributeValue, int32 MaxAttributeValue, float EnemyTypeValue);
 };
