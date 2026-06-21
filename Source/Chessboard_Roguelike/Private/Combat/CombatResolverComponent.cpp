@@ -100,6 +100,8 @@ FEnemyAttackResolveResult UCombatResolverComponent::ResolveEnemyMeleeAttack(
 		return Result;
 	}
 
+	PlayerPawn->ResolvePickupAtCurrentTile();
+
 	UPlayerAttributeComponent* AttributeComponent = PlayerPawn->PlayerAttributeComponent;
 	if (!AttributeComponent)
 	{
@@ -123,6 +125,7 @@ FEnemyAttackResolveResult UCombatResolverComponent::ResolveEnemyMeleeAttack(
 	{
 		AttributeComponent->ApplyHealthDamage(Damage.HealthDamage);
 		Result.AppliedHealthDamage = Damage.HealthDamage;
+		PlayerPawn->ResolvePickupAtCurrentTile();
 	}
 
 	Result.RemainingHealth = AttributeComponent->GetCurrentHealth();

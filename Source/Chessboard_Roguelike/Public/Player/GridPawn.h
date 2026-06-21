@@ -178,6 +178,8 @@ public:
 	void StartVisualMove(const FVector& From, const FVector& To);
 	void FinishVisualMove();
 
+	bool ResolvePickupAtCurrentTile();
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -207,6 +209,5 @@ private:
 	void StartFailedAttackVisualMove(const FVector& From, const FVector& BlockedTarget);
 	void FindEnemyManagerIfNeeded();
 	void FindPickupManagerIfNeeded();
-	void ResolvePickupAtCurrentTile();
 	void ResolvePostPlayerActionTurn();
 };

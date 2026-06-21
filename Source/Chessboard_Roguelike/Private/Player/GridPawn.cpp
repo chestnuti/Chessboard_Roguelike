@@ -620,6 +620,8 @@ void AGridPawn::StartFailedAttackVisualMove(const FVector& From, const FVector& 
 
 void AGridPawn::FinishVisualMove()
 {
+	const bool bWasFailedAttackVisualMove = bIsFailedAttackVisualMove;
+
 	// Snap at the end to prevent small interpolation drift from desyncing visuals and grid state.
 	SetActorLocation(VisualMoveTo);
 	if (bRestoreDefaultVisualOnMoveFinish)
@@ -631,6 +633,11 @@ void AGridPawn::FinishVisualMove()
 	bIsFailedAttackVisualMove = false;
 	MoveElapsedTime = 0.f;
 	SetActorTickEnabled(false);
+
+	if (bWasFailedAttackVisualMove)
+	{
+		ResolvePickupAtCurrentTile();
+	}
 
 	ResolvePostPlayerActionTurn();
 }
@@ -667,13 +674,15 @@ void AGridPawn::FindPickupManagerIfNeeded()
 	}
 }
 
-void AGridPawn::ResolvePickupAtCurrentTile()
+bool AGridPawn::ResolvePickupAtCurrentTile()
 {
 	FindPickupManagerIfNeeded();
 	if (PickupManager)
 	{
-		PickupManager->TryCollectPickupAt(CurrentGridCoord, this);
+		return PickupManager->TryCollectPickupAt(CurrentGridCoord, this);
 	}
+
+	return false;
 }
 
 void AGridPawn::ResolvePostPlayerActionTurn()
