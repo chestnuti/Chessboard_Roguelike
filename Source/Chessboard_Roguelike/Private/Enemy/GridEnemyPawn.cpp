@@ -1,9 +1,11 @@
 #include "Enemy/GridEnemyPawn.h"
 
+#include "Audio/GameAudioSubsystem.h"
 #include "Combat/CombatResolverComponent.h"
 #include "Combat/CombatPreviewReceiver.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/GameInstance.h"
 #include "EngineUtils.h"
 #include "Grid/GridManager.h"
 #include "Enemy/RangedAttackTelegraphComponent.h"
@@ -294,6 +296,14 @@ bool AGridEnemyPawn::ExecuteBasicTurn_Implementation(AGridPawn* PlayerPawn)
 	const int32 ManhattanDistance = FMath::Abs(Delta.X) + FMath::Abs(Delta.Y);
 	if (ManhattanDistance == 1)
 	{
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				AudioSubsystem->PlayEnemyMeleeAttackSFX(AudioProfile, GetActorLocation());
+			}
+		}
+
 		bMeleeDamageResolvedInCurrentAttack = false;
 		LastMeleeAttackResult = ApplyMeleeAttackDamage(PlayerPawn);
 		ExecuteMeleeAttack(PlayerPawn);
@@ -334,6 +344,8 @@ bool AGridEnemyPawn::ResolvePendingRangedAttack(AGridPawn* PlayerPawn)
 	const bool bHitPlayer = AttackTiles.Contains(PlayerPawn->CurrentGridCoord);
 	FEnemyAttackResolveResult AttackResult;
 
+	PlayRangedAttackAudio();
+
 	if (bHitPlayer)
 	{
 		AttackResult = ApplyRangedAttackDamage(PlayerPawn);
@@ -362,6 +374,17 @@ bool AGridEnemyPawn::ResolvePendingRangedAttack(AGridPawn* PlayerPawn)
 	ClearRangedAimMode();
 	OnRangedAttackResolved(PlayerPawn, AttackTiles, AttackResult, bHitPlayer);
 	return true;
+}
+
+void AGridEnemyPawn::PlayRangedAttackAudio()
+{
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			AudioSubsystem->PlayEnemyRangedAttackSFX(AudioProfile, GetActorLocation());
+		}
+	}
 }
 
 void AGridEnemyPawn::ClearRangedAimMode()
@@ -398,6 +421,14 @@ bool AGridEnemyPawn::EnterRangedAimMode(AGridPawn* PlayerPawn)
 	if (RangedAttackTelegraphComponent)
 	{
 		RangedAttackTelegraphComponent->ShowTelegraph(GridManager, PendingRangedAttackTiles);
+	}
+
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			AudioSubsystem->PlayEnemyRangedAimSFX(AudioProfile, GetActorLocation());
+		}
 	}
 
 	OnRangedAimStarted(PlayerPawn, PendingRangedAttackTiles);
@@ -672,6 +703,21 @@ void AGridEnemyPawn::Kill()
 
 	const FIntPoint DeathCoord = CurrentGridCoord;
 	const FVector DeathWorldLocation = GridManager ? GridManager->GridToWorld(DeathCoord) : GetActorLocation();
+
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			if (BehaviorType == EEnemyBehaviorType::Ranged)
+			{
+				AudioSubsystem->PlayEnemyRangedDeathSFX(AudioProfile, DeathWorldLocation);
+			}
+			else
+			{
+				AudioSubsystem->PlayEnemyMeleeDeathSFX(AudioProfile, DeathWorldLocation);
+			}
+		}
+	}
 
 	bDead = true;
 	if (GetClass()->ImplementsInterface(UCombatPreviewReceiver::StaticClass()))

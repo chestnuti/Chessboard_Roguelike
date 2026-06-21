@@ -65,7 +65,8 @@
 - `EnemySystem`：敌人数据、AI 行为、伤害判定、死亡逻辑
 - `CombatSystem`：攻击结算、免疫、压制、友伤、退回规则
 - `UISystem`：HUD、提示、能量显示、状态反馈
-- `VFXSFXSystem`：移动、攻击、压制、地块转换表现
+- `AudioSystem`：BGM 淡入淡出、玩家/敌人/关卡/UI 事件音效、随机音效池、音频 DataAsset 配置
+- `VFXSystem`：移动、攻击、压制、地块转换表现
 
 ### 3.2 数据驱动原则
 
@@ -593,6 +594,17 @@ Seed = RandomSeedPerLevelStart ? RuntimeRandomSeed : BaseSeed + CurrentDungeonLe
 - 玩家必须能快速识别下一步可以移动到哪些格子
 - 玩家必须能区分当前属性成长方向
 - 玩家必须能识别敌人类型与压制状态
+
+### 10.5 音频反馈
+
+- BGM 由 `UGameAudioSubsystem` 管理，不随关卡 Actor 生命周期销毁。
+- 主菜单和关卡分别配置 BGM，切换时使用淡出淡入。
+- 玩家攻击、击杀、变身、获得能量、使用能量、获得属性、属性满值、死亡均走统一玩家音效槽位。
+- 近战敌人和远程敌人使用 `UEnemyAudioProfileDataAsset` 分别配置攻击、瞄准和死亡音效。
+- 关卡开始、失败、胜利、切换由 `DungeonRunManager` 和 `TurnManager` 触发。
+- UI Hover 和 Click 由 Widget 蓝图调用 `UGameAudioSubsystem` 接口。
+- 每个事件音效槽位使用 `FGameSoundSet`，可配置多个 `USoundBase`，触发时随机选择一个有效音效播放。
+- 详细接入方式见 [音频系统技术说明](../07_AudioSystem/Audio_SystemGuide.md)。
 
 ---
 

@@ -1,5 +1,9 @@
 #include "Player/ConversionEnergyComponent.h"
 
+#include "Audio/GameAudioSubsystem.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+
 UConversionEnergyComponent::UConversionEnergyComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -28,6 +32,14 @@ void UConversionEnergyComponent::GrantConversionEnergy(ETileType IgnoredEnergyTy
 
 	bHasConversionEnergy = true;
 
+	if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			AudioSubsystem->PlayPlayerGainEnergySFX();
+		}
+	}
+
 	OnConversionEnergyGranted.Broadcast(HeldConversionEnergyType);
 	if (!bWasHoldingEnergy)
 	{
@@ -43,6 +55,15 @@ bool UConversionEnergyComponent::SetHeldConversionEnergyType(ETileType NewEnergy
 	}
 
 	HeldConversionEnergyType = NewEnergyType;
+
+	if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			AudioSubsystem->PlayPlayerSwitchEnergySFX();
+		}
+	}
+
 	OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, HeldConversionEnergyType);
 	return true;
 }
@@ -66,6 +87,14 @@ bool UConversionEnergyComponent::ConsumeConversionEnergy()
 
 	const ETileType ConsumedEnergyType = HeldConversionEnergyType;
 	bHasConversionEnergy = false;
+
+	if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			AudioSubsystem->PlayPlayerUseEnergySFX();
+		}
+	}
 
 	OnConversionEnergyConsumed.Broadcast(ConsumedEnergyType);
 	OnConversionEnergyChanged.Broadcast(bHasConversionEnergy, ETileType::Minimal);

@@ -1,5 +1,8 @@
 #include "Core/TurnManager.h"
 
+#include "Audio/GameAudioSubsystem.h"
+#include "Engine/GameInstance.h"
+
 DEFINE_LOG_CATEGORY_STATIC(LogTurnManager, Log, All);
 
 ATurnManager::ATurnManager()
@@ -22,6 +25,21 @@ void ATurnManager::SetTurnState(ETurnState NewState)
 	UE_LOG(LogTurnManager, Log, TEXT("Turn state changed: %d -> %d"),
 		static_cast<uint8>(CurrentTurnState), static_cast<uint8>(NewState));
 	CurrentTurnState = NewState;
+
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			if (CurrentTurnState == ETurnState::Victory)
+			{
+				AudioSubsystem->PlayLevelVictorySFX();
+			}
+			else if (CurrentTurnState == ETurnState::Defeat)
+			{
+				AudioSubsystem->PlayLevelFailedSFX();
+			}
+		}
+	}
 }
 
 void ATurnManager::BeginPlayerAction()

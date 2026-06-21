@@ -12,6 +12,7 @@ class AGridEnemyPawn;
 class URangedAttackTelegraphComponent;
 class USceneComponent;
 class UStaticMeshComponent;
+class UEnemyAudioProfileDataAsset;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGridEnemyKilled, AGridEnemyPawn*, Enemy, FIntPoint, DeathCoord, FVector, DeathWorldLocation);
 
@@ -37,6 +38,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy")
 	EEnemyBehaviorType BehaviorType = EEnemyBehaviorType::Melee;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Enemy|Audio")
+	TObjectPtr<UEnemyAudioProfileDataAsset> AudioProfile;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Enemy")
 	EEnemyActionState ActionState = EEnemyActionState::Idle;
@@ -116,6 +120,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Ranged")
 	bool ResolvePendingRangedAttack(AGridPawn* PlayerPawn);
+
+	void PlayRangedAttackAudio();
 
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Ranged")
 	void ClearRangedAimMode();

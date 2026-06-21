@@ -421,6 +421,8 @@ int32 AGridEnemyManager::ResolvePendingRangedAttacks(TSet<AGridEnemyPawn*>& OutR
 			continue;
 		}
 
+		QueuedAttack.Attacker->PlayRangedAttackAudio();
+
 		if (QueuedAttack.bHitPlayer)
 		{
 			QueuedAttack.PlayerAttackResult = QueuedAttack.Attacker->ApplyRangedAttackDamage(PlayerPawn);

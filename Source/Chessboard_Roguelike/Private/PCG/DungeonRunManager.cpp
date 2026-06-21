@@ -1,9 +1,11 @@
 #include "PCG/DungeonRunManager.h"
 
+#include "Audio/GameAudioSubsystem.h"
 #include "Core/TurnManager.h"
 #include "Core/TurnStateTypes.h"
 #include "Enemy/GridEnemyManager.h"
 #include "Enemy/GridEnemyPawn.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
@@ -37,6 +39,9 @@ void ADungeonRunManager::BeginPlay()
 
 bool ADungeonRunManager::StartLevel(int32 LevelIndex)
 {
+	const int32 PreviousDungeonLevel = CurrentDungeonLevel;
+	const bool bIsLevelTransition = LevelIndex != PreviousDungeonLevel;
+
 	CurrentDungeonLevel = FMath::Max(1, LevelIndex);
 	RuntimeDungeonGenerationSettings = nullptr;
 	bCurrentLevelCompleted = false;
@@ -44,6 +49,17 @@ bool ADungeonRunManager::StartLevel(int32 LevelIndex)
 	if (bAutoFindReferences)
 	{
 		ResolveRuntimeReferences();
+	}
+
+	if (bIsLevelTransition)
+	{
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				AudioSubsystem->PlayLevelTransitionSFX();
+			}
+		}
 	}
 
 	ClearRuntimeActorsForLevelTransition();
@@ -57,6 +73,14 @@ bool ADungeonRunManager::StartLevel(int32 LevelIndex)
 	const bool bStarted = GenerateAndInitializeRun();
 	if (bStarted)
 	{
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				AudioSubsystem->PlayLevelStartSFX();
+			}
+		}
+
 		BindEnemyClearEvent();
 		OnDungeonLevelStarted.Broadcast(CurrentDungeonLevel);
 

@@ -1,5 +1,9 @@
 #include "Player/PlayerAttributeComponent.h"
 
+#include "Audio/GameAudioSubsystem.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+
 UPlayerAttributeComponent::UPlayerAttributeComponent()
 {
 	// Attribute updates are event-driven; HUD refreshes through OnPlayerAttributeChanged instead of Tick.
@@ -10,6 +14,8 @@ void UPlayerAttributeComponent::ApplyTileAttributeDelta(int32 ConstructDelta, in
 {
 	const int32 OldConstructValue = ConstructValue;
 	const int32 OldAcidValue = AcidValue;
+	const bool bWasConstructMaxed = IsConstructValueMaxed();
+	const bool bWasAcidMaxed = IsAcidValueMaxed();
 
 	ConstructValue = FMath::Clamp(ConstructValue + ConstructDelta, 0, MaxConstructValue);
 	AcidValue = FMath::Clamp(AcidValue + AcidDelta, 0, MaxAcidValue);
@@ -17,6 +23,22 @@ void UPlayerAttributeComponent::ApplyTileAttributeDelta(int32 ConstructDelta, in
 	// Broadcast only when the clamped result actually changes, avoiding redundant HUD refreshes.
 	if (ConstructValue != OldConstructValue || AcidValue != OldAcidValue)
 	{
+		if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				if (ConstructValue > OldConstructValue || AcidValue > OldAcidValue)
+				{
+					AudioSubsystem->PlayPlayerGainAttributeSFX();
+				}
+
+				if ((!bWasConstructMaxed && IsConstructValueMaxed()) || (!bWasAcidMaxed && IsAcidValueMaxed()))
+				{
+					AudioSubsystem->PlayPlayerAttributeFullSFX();
+				}
+			}
+		}
+
 		OnPlayerAttributeChanged.Broadcast(ConstructValue, AcidValue);
 	}
 }
@@ -48,6 +70,14 @@ bool UPlayerAttributeComponent::ApplyHealthDamage(int32 DamageAmount)
 
 	if (OldHealth > 0 && CurrentHealth <= 0)
 	{
+		if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				AudioSubsystem->PlayPlayerDeathSFX();
+			}
+		}
+
 		OnPlayerDefeated.Broadcast();
 	}
 

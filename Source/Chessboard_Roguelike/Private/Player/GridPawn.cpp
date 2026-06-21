@@ -1,5 +1,6 @@
 #include "Player/GridPawn.h"
 
+#include "Audio/GameAudioSubsystem.h"
 #include "Combat/CombatResolverComponent.h"
 #include "Combat/CombatPreviewReceiver.h"
 #include "Combat/CombatPreviewTypes.h"
@@ -9,6 +10,7 @@
 #include "Core/TurnManager.h"
 #include "Core/TurnStateTypes.h"
 #include "Data/ChessPieceFormData.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Enemy/GridEnemyManager.h"
@@ -239,6 +241,14 @@ bool AGridPawn::TryTransformMoveToCoord(FIntPoint TargetCoord, UChessPieceFormDa
 	const bool bAppliedVisualForThisMove = !bIsTransformVisualActive;
 	if (bAppliedVisualForThisMove)
 	{
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				AudioSubsystem->PlayPlayerTransformSFX();
+			}
+		}
+
 		ApplyTransformVisual(FormData);
 	}
 
@@ -424,6 +434,14 @@ bool AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 	const FVector FromLocation = GetActorLocation();
 	const FVector TargetLocation = GridManager->GridToWorld(TargetCoord);
 
+	if (UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			AudioSubsystem->PlayPlayerAttackSFX();
+		}
+	}
+
 	TurnManager->BeginPlayerAction();
 	GridManager->ClearPlayerNextMoveTiles();
 	ClearCombatPreview();
@@ -439,6 +457,14 @@ bool AGridPawn::ResolveEnemyMeleeAttack(FIntPoint TargetCoord, AGridEnemyPawn* E
 		FTileData TargetTileData;
 		GridManager->GetTileData(TargetCoord, TargetTileData);
 		const ETileType EnteredTileType = TargetTileData.TileType;
+
+		if (UGameInstance* GameInstance = GetGameInstance())
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				AudioSubsystem->PlayPlayerKillSFX();
+			}
+		}
 
 		EnemyActor->Kill();
 		GridManager->ClearOccupant(TargetCoord);
