@@ -5,11 +5,13 @@
 #include "Data/ChessPieceFormData.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "EngineUtils.h"
 #include "Grid/GridManager.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
+#include "PCG/DungeonRunManager.h"
 #include "Player/ConversionEnergyComponent.h"
 #include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
@@ -84,6 +86,16 @@ void AGridPlayerController::BeginPlay()
 				PlayerAttributeHUD->InitializeFromAttributeComponent(ControlledPawn->FindComponentByClass<UPlayerAttributeComponent>());
 				PlayerAttributeHUD->InitializeFromConversionEnergyComponent(ControlledPawn->FindComponentByClass<UConversionEnergyComponent>());
 			}
+
+			if (UWorld* World = GetWorld())
+			{
+				for (TActorIterator<ADungeonRunManager> It(World); It; ++It)
+				{
+					PlayerAttributeHUD->InitializeFromDungeonRunManager(*It);
+					break;
+				}
+			}
+
 			PlayerAttributeHUD->AddToViewport();
 		}
 	}

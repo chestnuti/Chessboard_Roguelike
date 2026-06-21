@@ -10,6 +10,7 @@ class AGridPawn;
 class ATurnManager;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAllEnemiesCleared);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEnemyCountChanged, int32, AliveEnemyCount);
 
 UCLASS(Blueprintable)
 class CHESSBOARD_ROGUELIKE_API AGridEnemyManager : public AActor
@@ -61,12 +62,16 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Enemy")
 	FOnAllEnemiesCleared OnAllEnemiesCleared;
 
+	UPROPERTY(BlueprintAssignable, Category = "Enemy")
+	FOnEnemyCountChanged OnEnemyCountChanged;
+
 private:
 	UFUNCTION()
 	void HandleEnemyKilled(AGridEnemyPawn* Enemy, FIntPoint DeathCoord, FVector DeathWorldLocation);
 
 	void AutoInitializeReferences();
 	void PruneInvalidEnemies();
+	void BroadcastEnemyCountChanged();
 	bool HasMovingEnemies() const;
 	int32 ResolvePendingRangedAttacks(TSet<AGridEnemyPawn*>& OutResolvedAttackers);
 

@@ -16,6 +16,8 @@
 #include "Pickup/GridPickupActor.h"
 #include "Pickup/GridPickupManager.h"
 #include "Player/GridPawn.h"
+#include "Player/PlayerAttributeComponent.h"
+#include "Save/RunRecordBlueprintLibrary.h"
 #include "Tutorial/TutorialFlowComponent.h"
 #include "TimerManager.h"
 #include "Tutorial/TutorialLevelSet.h"
@@ -73,6 +75,13 @@ bool ADungeonRunManager::StartLevel(int32 LevelIndex)
 	const bool bStarted = GenerateAndInitializeRun();
 	if (bStarted)
 	{
+		if (GenerationMode == EDungeonRunGenerationMode::Procedural && !bRunTimerRunning)
+		{
+			RunStartTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+			CompletedRunElapsedSeconds = 0;
+			bRunTimerRunning = true;
+		}
+
 		if (UGameInstance* GameInstance = GetGameInstance())
 		{
 			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
@@ -82,6 +91,8 @@ bool ADungeonRunManager::StartLevel(int32 LevelIndex)
 		}
 
 		BindEnemyClearEvent();
+		BindPlayerDefeatEvent();
+		RecordCurrentRunProgress();
 		OnDungeonLevelStarted.Broadcast(CurrentDungeonLevel);
 
 		if (bSpawnEnemies && EnemyManager && EnemyManager->GetAliveEnemies().IsEmpty())
@@ -124,6 +135,44 @@ void ADungeonRunManager::CompleteCurrentLevel()
 			AutoAdvanceDelay,
 			false);
 	}
+}
+
+int32 ADungeonRunManager::GetCurrentLevelDisplayIndex() const
+{
+	return GenerationMode == EDungeonRunGenerationMode::TutorialFixed
+		? TutorialLevelIndex + 1
+		: CurrentDungeonLevel;
+}
+
+int32 ADungeonRunManager::GetCurrentLevelElapsedSeconds() const
+{
+	return GetCurrentRunElapsedSeconds();
+}
+
+bool ADungeonRunManager::IsLevelTimerRunning() const
+{
+	return IsRunTimerRunning();
+}
+
+int32 ADungeonRunManager::GetCurrentRunElapsedSeconds() const
+{
+	if (!bRunTimerRunning)
+	{
+		return CompletedRunElapsedSeconds;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return 0;
+	}
+
+	return FMath::Max(0, FMath::FloorToInt(World->GetTimeSeconds() - RunStartTimeSeconds));
+}
+
+bool ADungeonRunManager::IsRunTimerRunning() const
+{
+	return bRunTimerRunning;
 }
 
 bool ADungeonRunManager::GenerateAndInitializeRun()
@@ -657,6 +706,68 @@ void ADungeonRunManager::BindEnemyClearEvent()
 
 	EnemyManager->OnAllEnemiesCleared.RemoveDynamic(this, &ADungeonRunManager::CompleteCurrentLevel);
 	EnemyManager->OnAllEnemiesCleared.AddDynamic(this, &ADungeonRunManager::CompleteCurrentLevel);
+}
+
+void ADungeonRunManager::BindPlayerDefeatEvent()
+{
+	if (GenerationMode != EDungeonRunGenerationMode::Procedural || !PlayerPawn)
+	{
+		return;
+	}
+
+	UPlayerAttributeComponent* PlayerAttributeComponent = PlayerPawn->FindComponentByClass<UPlayerAttributeComponent>();
+	if (!PlayerAttributeComponent)
+	{
+		return;
+	}
+
+	if (BoundPlayerAttributeComponent == PlayerAttributeComponent)
+	{
+		BoundPlayerAttributeComponent->OnPlayerDefeated.RemoveDynamic(this, &ADungeonRunManager::HandlePlayerDefeated);
+		BoundPlayerAttributeComponent->OnPlayerDefeated.AddDynamic(this, &ADungeonRunManager::HandlePlayerDefeated);
+		return;
+	}
+
+	UnbindPlayerDefeatEvent();
+	BoundPlayerAttributeComponent = PlayerAttributeComponent;
+	BoundPlayerAttributeComponent->OnPlayerDefeated.AddDynamic(this, &ADungeonRunManager::HandlePlayerDefeated);
+}
+
+void ADungeonRunManager::UnbindPlayerDefeatEvent()
+{
+	if (BoundPlayerAttributeComponent)
+	{
+		BoundPlayerAttributeComponent->OnPlayerDefeated.RemoveDynamic(this, &ADungeonRunManager::HandlePlayerDefeated);
+		BoundPlayerAttributeComponent = nullptr;
+	}
+}
+
+void ADungeonRunManager::RecordCurrentRunProgress() const
+{
+	if (GenerationMode != EDungeonRunGenerationMode::Procedural)
+	{
+		return;
+	}
+
+	URunRecordBlueprintLibrary::RecordRunProgress(this, GetCurrentLevelDisplayIndex(), GetCurrentRunElapsedSeconds());
+}
+
+void ADungeonRunManager::StopRunTimerAndRecordDefeat()
+{
+	if (!bRunTimerRunning)
+	{
+		return;
+	}
+
+	CompletedRunElapsedSeconds = GetCurrentRunElapsedSeconds();
+	bRunTimerRunning = false;
+	RecordCurrentRunProgress();
+	OnDungeonRunEnded.Broadcast(GetCurrentLevelDisplayIndex(), CompletedRunElapsedSeconds);
+}
+
+void ADungeonRunManager::HandlePlayerDefeated()
+{
+	StopRunTimerAndRecordDefeat();
 }
 
 void ADungeonRunManager::AdvanceToNextLevelFromTimer()

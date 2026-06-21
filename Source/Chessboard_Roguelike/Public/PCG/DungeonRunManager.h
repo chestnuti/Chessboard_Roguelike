@@ -14,12 +14,14 @@ class AGridPickupActor;
 class ATurnManager;
 class UDungeonGenerationSettings;
 class UTutorialLevelSet;
+class UPlayerAttributeComponent;
 struct FDungeonEnemySpawnEntry;
 struct FDungeonPickupSpawnEntry;
 struct FTutorialLevelDefinition;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDungeonLevelStarted, int32, LevelIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDungeonLevelCompleted, int32, CompletedLevelIndex, int32, NextLevelIndex);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDungeonRunEnded, int32, FinalLevelIndex, int32, ElapsedSeconds);
 
 UENUM(BlueprintType)
 enum class EDungeonRunGenerationMode : uint8
@@ -120,6 +122,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Dungeon|Progression")
 	FOnDungeonLevelCompleted OnDungeonLevelCompleted;
 
+	UPROPERTY(BlueprintAssignable, Category = "Dungeon|Progression")
+	FOnDungeonRunEnded OnDungeonRunEnded;
+
 	UFUNCTION(BlueprintCallable, Category = "Dungeon|Progression")
 	bool StartLevel(int32 LevelIndex);
 
@@ -128,6 +133,21 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Dungeon|Progression")
 	void CompleteCurrentLevel();
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dungeon|Progression")
+	int32 GetCurrentLevelDisplayIndex() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dungeon|Progression")
+	int32 GetCurrentLevelElapsedSeconds() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dungeon|Progression")
+	bool IsLevelTimerRunning() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dungeon|Progression")
+	int32 GetCurrentRunElapsedSeconds() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dungeon|Progression")
+	bool IsRunTimerRunning() const;
 
 	// Generates a layout, applies it to the grid, then initializes actors that depend on the generated coordinates.
 	UFUNCTION(BlueprintCallable, Category = "PCG|Dungeon")
@@ -148,6 +168,12 @@ private:
 	void SpawnPickupsFromLayout();
 	void ClearRuntimeActorsForLevelTransition();
 	void BindEnemyClearEvent();
+	void BindPlayerDefeatEvent();
+	void UnbindPlayerDefeatEvent();
+	void RecordCurrentRunProgress() const;
+	void StopRunTimerAndRecordDefeat();
+	UFUNCTION()
+	void HandlePlayerDefeated();
 	void AdvanceToNextLevelFromTimer();
 	UDungeonGenerationSettings* BuildRuntimeSettingsForLevel(int32 LevelIndex);
 	const UDungeonGenerationSettings* GetActiveDungeonGenerationSettings() const;
@@ -163,4 +189,10 @@ private:
 	AGridPickupManager* EnsurePickupManager();
 
 	bool bCurrentLevelCompleted = false;
+	bool bRunTimerRunning = false;
+	double RunStartTimeSeconds = 0.0;
+	int32 CompletedRunElapsedSeconds = 0;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPlayerAttributeComponent> BoundPlayerAttributeComponent;
 };

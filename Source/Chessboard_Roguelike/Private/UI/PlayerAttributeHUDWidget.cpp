@@ -2,12 +2,15 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Image.h"
+#include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Enemy/GridEnemyManager.h"
+#include "PCG/DungeonRunManager.h"
 #include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
 
@@ -59,10 +62,16 @@ void UPlayerAttributeHUDWidget::NativeConstruct()
 
 	RefreshAttributeDisplay();
 	RefreshConversionEnergyDisplay();
+	RefreshDungeonDisplay();
+	RefreshEnemyCountDisplay();
+	StartDungeonRunTimerRefresh();
 }
 
 void UPlayerAttributeHUDWidget::NativeDestruct()
 {
+	StopDungeonRunTimerRefresh();
+	UnbindFromEnemyManager();
+	UnbindFromDungeonRunManager();
 	UnbindFromConversionEnergyComponent();
 	UnbindFromAttributeComponent();
 	Super::NativeDestruct();
@@ -78,6 +87,13 @@ void UPlayerAttributeHUDWidget::InitializeFromConversionEnergyComponent(UConvers
 {
 	BindToConversionEnergyComponent(InEnergyComponent);
 	RefreshConversionEnergyDisplay();
+}
+
+void UPlayerAttributeHUDWidget::InitializeFromDungeonRunManager(ADungeonRunManager* InDungeonRunManager)
+{
+	BindToDungeonRunManager(InDungeonRunManager);
+	RefreshDungeonDisplay();
+	StartDungeonRunTimerRefresh();
 }
 
 void UPlayerAttributeHUDWidget::RefreshAttributeDisplay()
@@ -150,6 +166,35 @@ void UPlayerAttributeHUDWidget::RefreshConversionEnergyDisplay()
 	}
 }
 
+void UPlayerAttributeHUDWidget::RefreshDungeonDisplay()
+{
+	if (LevelText)
+	{
+		const int32 LevelIndex = DungeonRunManager ? DungeonRunManager->GetCurrentLevelDisplayIndex() : 1;
+		LevelText->SetText(FText::Format(
+			NSLOCTEXT("PlayerAttributeHUD", "DungeonLevelFormat", "Level: {0}"),
+			FText::AsNumber(LevelIndex)));
+	}
+
+	if (TimerText)
+	{
+		TimerText->SetText(GetDungeonTimerText());
+	}
+}
+
+void UPlayerAttributeHUDWidget::RefreshEnemyCountDisplay()
+{
+	if (!EnemyCountText)
+	{
+		return;
+	}
+
+	const int32 AliveEnemyCount = EnemyManager ? EnemyManager->GetAliveEnemies().Num() : 0;
+	EnemyCountText->SetText(FText::Format(
+		NSLOCTEXT("PlayerAttributeHUD", "EnemyCountFormat", "Enemies: {0}"),
+		FText::AsNumber(AliveEnemyCount)));
+}
+
 FText UPlayerAttributeHUDWidget::GetConversionEnergyStatusText() const
 {
 	if (!ConversionEnergyComponent || !ConversionEnergyComponent->HasConversionEnergy())
@@ -160,6 +205,14 @@ FText UPlayerAttributeHUDWidget::GetConversionEnergyStatusText() const
 	return FText::Format(
 		NSLOCTEXT("PlayerAttributeHUD", "ConversionEnergyHeldFormat", "Energy: {0}"),
 		GetConversionEnergyTypeDisplayName(ConversionEnergyComponent->GetHeldConversionEnergyType()));
+}
+
+FText UPlayerAttributeHUDWidget::GetDungeonTimerText() const
+{
+	const int32 ElapsedSeconds = DungeonRunManager ? DungeonRunManager->GetCurrentRunElapsedSeconds() : 0;
+	const int32 Minutes = ElapsedSeconds / 60;
+	const int32 Seconds = ElapsedSeconds % 60;
+	return FText::FromString(FString::Printf(TEXT("Run Time: %02d:%02d"), Minutes, Seconds));
 }
 
 void UPlayerAttributeHUDWidget::HandlePlayerAttributeChanged(int32 NewConstructValue, int32 NewAcidValue)
@@ -178,17 +231,65 @@ void UPlayerAttributeHUDWidget::HandleConversionEnergyChanged(bool bHasEnergy, E
 	RefreshConversionEnergyDisplay();
 }
 
+void UPlayerAttributeHUDWidget::HandleDungeonLevelStarted(int32 LevelIndex)
+{
+	if (DungeonRunManager)
+	{
+		BindToEnemyManager(DungeonRunManager->EnemyManager);
+	}
+
+	RefreshDungeonDisplay();
+	RefreshEnemyCountDisplay();
+	StartDungeonRunTimerRefresh();
+}
+
+void UPlayerAttributeHUDWidget::HandleDungeonLevelCompleted(int32 CompletedLevelIndex, int32 NextLevelIndex)
+{
+	RefreshDungeonDisplay();
+	RefreshEnemyCountDisplay();
+}
+
+void UPlayerAttributeHUDWidget::HandleDungeonRunEnded(int32 FinalLevelIndex, int32 ElapsedSeconds)
+{
+	RefreshDungeonDisplay();
+	StopDungeonRunTimerRefresh();
+}
+
+void UPlayerAttributeHUDWidget::HandleEnemyCountChanged(int32 AliveEnemyCount)
+{
+	RefreshEnemyCountDisplay();
+}
+
 void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 {
-	if (!WidgetTree || HealthText || HealthProgressBar || ConstructText || AcidText || ConstructProgressBar || AcidProgressBar || EnergyText)
+	if (!WidgetTree)
 	{
-		// Widget Blueprints with named bindings keep their authored layout.
+		return;
+	}
+
+	if (HealthText || HealthProgressBar || ConstructText || AcidText || ConstructProgressBar || AcidProgressBar || EnergyText || LevelText || TimerText || EnemyCountText)
+	{
+		if (!LevelText)
+		{
+			LevelText = CreateFallbackTextBlock(TEXT("LevelText"), NSLOCTEXT("PlayerAttributeHUD", "LevelInitialText", "Level: 1"));
+		}
+		if (!TimerText)
+		{
+			TimerText = CreateFallbackTextBlock(TEXT("TimerText"), NSLOCTEXT("PlayerAttributeHUD", "TimerInitialText", "Run Time: 00:00"));
+		}
+		if (!EnemyCountText)
+		{
+			EnemyCountText = CreateFallbackTextBlock(TEXT("EnemyCountText"), NSLOCTEXT("PlayerAttributeHUD", "EnemyCountInitialText", "Enemies: 0"));
+		}
 		return;
 	}
 
 	UVerticalBox* RootBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("AttributeRoot"));
 	WidgetTree->RootWidget = RootBox;
 
+	LevelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("LevelText"));
+	TimerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TimerText"));
+	EnemyCountText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("EnemyCountText"));
 	HealthText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HealthText"));
 	HealthProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("HealthProgressBar"));
 	ConstructText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ConstructText"));
@@ -196,6 +297,24 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 	AcidText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("AcidText"));
 	AcidProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("AcidProgressBar"));
 	EnergyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("EnergyText"));
+
+	if (LevelText)
+	{
+		LevelText->SetText(NSLOCTEXT("PlayerAttributeHUD", "LevelInitialText", "Level: 1"));
+		RootBox->AddChildToVerticalBox(LevelText);
+	}
+
+	if (TimerText)
+	{
+		TimerText->SetText(NSLOCTEXT("PlayerAttributeHUD", "TimerInitialText", "Run Time: 00:00"));
+		RootBox->AddChildToVerticalBox(TimerText);
+	}
+
+	if (EnemyCountText)
+	{
+		EnemyCountText->SetText(NSLOCTEXT("PlayerAttributeHUD", "EnemyCountInitialText", "Enemies: 0"));
+		RootBox->AddChildToVerticalBox(EnemyCountText);
+	}
 
 	if (HealthText)
 	{
@@ -235,6 +354,29 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 		EnergyText->SetText(NSLOCTEXT("PlayerAttributeHUD", "EnergyInitialText", "Energy: None"));
 		RootBox->AddChildToVerticalBox(EnergyText);
 	}
+}
+
+UTextBlock* UPlayerAttributeHUDWidget::CreateFallbackTextBlock(const FName& WidgetName, const FText& InitialText)
+{
+	if (!WidgetTree)
+	{
+		return nullptr;
+	}
+
+	UTextBlock* TextBlock = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), WidgetName);
+	if (!TextBlock)
+	{
+		return nullptr;
+	}
+
+	TextBlock->SetText(InitialText);
+
+	if (UPanelWidget* RootPanel = Cast<UPanelWidget>(WidgetTree->RootWidget))
+	{
+		RootPanel->AddChild(TextBlock);
+	}
+
+	return TextBlock;
 }
 
 void UPlayerAttributeHUDWidget::BindToAttributeComponent(UPlayerAttributeComponent* InAttributeComponent)
@@ -288,6 +430,89 @@ void UPlayerAttributeHUDWidget::UnbindFromConversionEnergyComponent()
 	{
 		ConversionEnergyComponent->OnConversionEnergyChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleConversionEnergyChanged);
 		ConversionEnergyComponent = nullptr;
+	}
+}
+
+void UPlayerAttributeHUDWidget::BindToDungeonRunManager(ADungeonRunManager* InDungeonRunManager)
+{
+	if (DungeonRunManager == InDungeonRunManager)
+	{
+		return;
+	}
+
+	UnbindFromDungeonRunManager();
+	DungeonRunManager = InDungeonRunManager;
+
+	if (DungeonRunManager)
+	{
+		DungeonRunManager->OnDungeonLevelStarted.AddDynamic(this, &UPlayerAttributeHUDWidget::HandleDungeonLevelStarted);
+		DungeonRunManager->OnDungeonLevelCompleted.AddDynamic(this, &UPlayerAttributeHUDWidget::HandleDungeonLevelCompleted);
+		DungeonRunManager->OnDungeonRunEnded.AddDynamic(this, &UPlayerAttributeHUDWidget::HandleDungeonRunEnded);
+		BindToEnemyManager(DungeonRunManager->EnemyManager);
+	}
+}
+
+void UPlayerAttributeHUDWidget::UnbindFromDungeonRunManager()
+{
+	if (DungeonRunManager)
+	{
+		UnbindFromEnemyManager();
+		DungeonRunManager->OnDungeonLevelStarted.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleDungeonLevelStarted);
+		DungeonRunManager->OnDungeonLevelCompleted.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleDungeonLevelCompleted);
+		DungeonRunManager->OnDungeonRunEnded.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleDungeonRunEnded);
+		DungeonRunManager = nullptr;
+	}
+}
+
+void UPlayerAttributeHUDWidget::BindToEnemyManager(AGridEnemyManager* InEnemyManager)
+{
+	if (EnemyManager == InEnemyManager)
+	{
+		RefreshEnemyCountDisplay();
+		return;
+	}
+
+	UnbindFromEnemyManager();
+	EnemyManager = InEnemyManager;
+
+	if (EnemyManager)
+	{
+		EnemyManager->OnEnemyCountChanged.AddDynamic(this, &UPlayerAttributeHUDWidget::HandleEnemyCountChanged);
+	}
+
+	RefreshEnemyCountDisplay();
+}
+
+void UPlayerAttributeHUDWidget::UnbindFromEnemyManager()
+{
+	if (EnemyManager)
+	{
+		EnemyManager->OnEnemyCountChanged.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleEnemyCountChanged);
+		EnemyManager = nullptr;
+	}
+}
+
+void UPlayerAttributeHUDWidget::StartDungeonRunTimerRefresh()
+{
+	UWorld* World = GetWorld();
+	if (!World || !DungeonRunManager || !DungeonRunManager->IsRunTimerRunning())
+	{
+		return;
+	}
+
+	World->GetTimerManager().SetTimer(
+		DungeonTimerRefreshHandle,
+		this,
+		&UPlayerAttributeHUDWidget::RefreshDungeonDisplay,
+		1.0f,
+		true);
+}
+
+void UPlayerAttributeHUDWidget::StopDungeonRunTimerRefresh()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DungeonTimerRefreshHandle);
 	}
 }
 

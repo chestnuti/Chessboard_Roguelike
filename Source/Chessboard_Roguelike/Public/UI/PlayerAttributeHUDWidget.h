@@ -3,8 +3,11 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Grid/GridTypes.h"
+#include "TimerManager.h"
 #include "PlayerAttributeHUDWidget.generated.h"
 
+class ADungeonRunManager;
+class AGridEnemyManager;
 class UConversionEnergyComponent;
 class UImage;
 class UMaterialInstanceDynamic;
@@ -27,6 +30,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Conversion Energy")
 	void InitializeFromConversionEnergyComponent(UConversionEnergyComponent* InEnergyComponent);
 
+	// Allows the controller or Blueprint to bind the HUD to the active dungeon run.
+	UFUNCTION(BlueprintCallable, Category = "Dungeon")
+	void InitializeFromDungeonRunManager(ADungeonRunManager* InDungeonRunManager);
+
 	// Safe to call from events or Blueprint when the displayed values need a refresh.
 	UFUNCTION(BlueprintCallable, Category = "Player Attributes")
 	void RefreshAttributeDisplay();
@@ -34,8 +41,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Conversion Energy")
 	void RefreshConversionEnergyDisplay();
 
+	UFUNCTION(BlueprintCallable, Category = "Dungeon")
+	void RefreshDungeonDisplay();
+
+	UFUNCTION(BlueprintCallable, Category = "Enemy")
+	void RefreshEnemyCountDisplay();
+
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Conversion Energy")
 	FText GetConversionEnergyStatusText() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dungeon")
+	FText GetDungeonTimerText() const;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -69,6 +85,15 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Conversion Energy")
 	TObjectPtr<UTextBlock> EnergyText;
 
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Dungeon")
+	TObjectPtr<UTextBlock> LevelText;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Dungeon")
+	TObjectPtr<UTextBlock> TimerText;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Enemy")
+	TObjectPtr<UTextBlock> EnemyCountText;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UPlayerAttributeComponent> AttributeComponent;
@@ -77,10 +102,18 @@ private:
 	TObjectPtr<UConversionEnergyComponent> ConversionEnergyComponent;
 
 	UPROPERTY(Transient)
+	TObjectPtr<ADungeonRunManager> DungeonRunManager;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AGridEnemyManager> EnemyManager;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ConstructAttributeMaterial;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> AcidAttributeMaterial;
+
+	FTimerHandle DungeonTimerRefreshHandle;
 
 	UFUNCTION()
 	void HandlePlayerAttributeChanged(int32 NewConstructValue, int32 NewAcidValue);
@@ -91,10 +124,29 @@ private:
 	UFUNCTION()
 	void HandleConversionEnergyChanged(bool bHasEnergy, ETileType EnergyType);
 
+	UFUNCTION()
+	void HandleDungeonLevelStarted(int32 LevelIndex);
+
+	UFUNCTION()
+	void HandleDungeonLevelCompleted(int32 CompletedLevelIndex, int32 NextLevelIndex);
+
+	UFUNCTION()
+	void HandleDungeonRunEnded(int32 FinalLevelIndex, int32 ElapsedSeconds);
+
+	UFUNCTION()
+	void HandleEnemyCountChanged(int32 AliveEnemyCount);
+
 	void BuildFallbackWidgetTreeIfNeeded();
 	void BindToAttributeComponent(UPlayerAttributeComponent* InAttributeComponent);
 	void UnbindFromAttributeComponent();
 	void BindToConversionEnergyComponent(UConversionEnergyComponent* InEnergyComponent);
 	void UnbindFromConversionEnergyComponent();
+	void BindToDungeonRunManager(ADungeonRunManager* InDungeonRunManager);
+	void UnbindFromDungeonRunManager();
+	void BindToEnemyManager(AGridEnemyManager* InEnemyManager);
+	void UnbindFromEnemyManager();
+	void StartDungeonRunTimerRefresh();
+	void StopDungeonRunTimerRefresh();
+	UTextBlock* CreateFallbackTextBlock(const FName& WidgetName, const FText& InitialText);
 	UMaterialInstanceDynamic* RefreshAttributeImage(UImage* AttributeImage, UMaterialInstanceDynamic* AttributeMaterial, int32 AttributeValue, int32 MaxAttributeValue, float EnemyTypeValue);
 };

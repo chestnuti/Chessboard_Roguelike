@@ -103,6 +103,7 @@ void AGridEnemyManager::RegisterEnemy(AGridEnemyPawn* Enemy)
 	RegisteredEnemies.AddUnique(Enemy);
 	Enemy->OnGridEnemyKilled.RemoveDynamic(this, &AGridEnemyManager::HandleEnemyKilled);
 	Enemy->OnGridEnemyKilled.AddDynamic(this, &AGridEnemyManager::HandleEnemyKilled);
+	BroadcastEnemyCountChanged();
 }
 
 void AGridEnemyManager::UnregisterEnemy(AGridEnemyPawn* Enemy)
@@ -114,6 +115,7 @@ void AGridEnemyManager::UnregisterEnemy(AGridEnemyPawn* Enemy)
 
 	Enemy->OnGridEnemyKilled.RemoveDynamic(this, &AGridEnemyManager::HandleEnemyKilled);
 	RegisteredEnemies.Remove(Enemy);
+	BroadcastEnemyCountChanged();
 }
 
 void AGridEnemyManager::RebuildEnemyList()
@@ -134,6 +136,7 @@ void AGridEnemyManager::RebuildEnemyList()
 	PruneInvalidEnemies();
 	UE_LOG(LogGridEnemyManager, Log, TEXT("Rebuilt enemy list: %d alive / %d registered."),
 		GetAliveEnemies().Num(), RegisteredEnemies.Num());
+	BroadcastEnemyCountChanged();
 }
 
 void AGridEnemyManager::ClearAllEnemies()
@@ -158,6 +161,7 @@ void AGridEnemyManager::ClearAllEnemies()
 	}
 
 	RegisteredEnemies.Reset();
+	BroadcastEnemyCountChanged();
 }
 
 void AGridEnemyManager::ExecuteEnemyTurn()
@@ -266,6 +270,7 @@ void AGridEnemyManager::HandleEnemyKilled(AGridEnemyPawn* Enemy, FIntPoint Death
 	}
 
 	PruneInvalidEnemies();
+	BroadcastEnemyCountChanged();
 	if (GetAliveEnemies().IsEmpty())
 	{
 		OnAllEnemiesCleared.Broadcast();
@@ -330,6 +335,11 @@ void AGridEnemyManager::PruneInvalidEnemies()
 	{
 		return !IsValid(Enemy) || !Enemy->IsAlive();
 	});
+}
+
+void AGridEnemyManager::BroadcastEnemyCountChanged()
+{
+	OnEnemyCountChanged.Broadcast(GetAliveEnemies().Num());
 }
 
 bool AGridEnemyManager::HasMovingEnemies() const
