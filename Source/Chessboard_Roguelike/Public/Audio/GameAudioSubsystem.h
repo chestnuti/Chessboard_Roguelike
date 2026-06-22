@@ -79,6 +79,9 @@ public:
 	void PlayPlayerSwitchEnergySFX();
 
 	UFUNCTION(BlueprintCallable, Category = "Game Audio|Player")
+	void PlayPlayerPickupItemSFX();
+
+	UFUNCTION(BlueprintCallable, Category = "Game Audio|Player")
 	void PlayPlayerGainAttributeSFX();
 
 	UFUNCTION(BlueprintCallable, Category = "Game Audio|Player")

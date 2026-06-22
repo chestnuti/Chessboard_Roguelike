@@ -1,7 +1,10 @@
 #include "Pickup/GridPickupActor.h"
 
+#include "Audio/GameAudioSubsystem.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Grid/GridManager.h"
 #include "Player/GridPawn.h"
 
@@ -56,6 +59,14 @@ bool AGridPickupActor::TryCollect(AGridPawn* PlayerPawn)
 	}
 
 	bCollected = true;
+	if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+		{
+			AudioSubsystem->PlayPlayerPickupItemSFX();
+		}
+	}
+
 	OnGridPickupCollected.Broadcast(this, PlayerPawn, bEffectApplied);
 	OnCollected(PlayerPawn, bEffectApplied);
 	Destroy();

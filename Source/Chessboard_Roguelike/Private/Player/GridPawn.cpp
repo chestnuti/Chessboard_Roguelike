@@ -28,6 +28,22 @@ DEFINE_LOG_CATEGORY_STATIC(LogGridPawn, Log, All);
 
 namespace
 {
+	void PlayPlayerTransformAudio(const AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return;
+		}
+
+		if (UGameInstance* GameInstance = Actor->GetGameInstance())
+		{
+			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
+			{
+				AudioSubsystem->PlayPlayerTransformSFX();
+			}
+		}
+	}
+
 	ETileType GetDroppedEnergyTypeForFaction(EEnemyFaction Faction)
 	{
 		switch (Faction)
@@ -241,14 +257,6 @@ bool AGridPawn::TryTransformMoveToCoord(FIntPoint TargetCoord, UChessPieceFormDa
 	const bool bAppliedVisualForThisMove = !bIsTransformVisualActive;
 	if (bAppliedVisualForThisMove)
 	{
-		if (UGameInstance* GameInstance = GetGameInstance())
-		{
-			if (UGameAudioSubsystem* AudioSubsystem = GameInstance->GetSubsystem<UGameAudioSubsystem>())
-			{
-				AudioSubsystem->PlayPlayerTransformSFX();
-			}
-		}
-
 		ApplyTransformVisual(FormData);
 	}
 
@@ -547,6 +555,7 @@ void AGridPawn::ApplyTransformVisual(UChessPieceFormData* FormData)
 
 	ActiveTransformVisualForm = FormData;
 	bIsTransformVisualActive = true;
+	PlayPlayerTransformAudio(this);
 
 	if (PawnMesh)
 	{
@@ -573,6 +582,7 @@ void AGridPawn::ApplyTransformVisual(UChessPieceFormData* FormData)
 void AGridPawn::RestoreDefaultPawnVisual()
 {
 	UChessPieceFormData* RestoredFormData = ActiveTransformVisualForm;
+	const bool bWasTransformVisualActive = bIsTransformVisualActive;
 
 	if (PawnMesh)
 	{
@@ -589,6 +599,10 @@ void AGridPawn::RestoreDefaultPawnVisual()
 
 	ActiveTransformVisualForm = nullptr;
 	bIsTransformVisualActive = false;
+	if (bWasTransformVisualActive)
+	{
+		PlayPlayerTransformAudio(this);
+	}
 
 	OnTransformVisualStateChanged.Broadcast(RestoredFormData, false);
 	OnTransformVisualRestored(RestoredFormData);

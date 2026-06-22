@@ -49,6 +49,9 @@ struct CHESSBOARD_ROGUELIKE_API FPlayerAudioSet
 	FGameSoundSet SwitchEnergy;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Audio")
+	FGameSoundSet PickupItem;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Audio")
 	FGameSoundSet GainAttribute;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Player Audio")

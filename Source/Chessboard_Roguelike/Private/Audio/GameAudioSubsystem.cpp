@@ -281,6 +281,14 @@ void UGameAudioSubsystem::PlayPlayerSwitchEnergySFX()
 	}
 }
 
+void UGameAudioSubsystem::PlayPlayerPickupItemSFX()
+{
+	if (AudioSettings)
+	{
+		Play2DSFX(AudioSettings->PlayerAudio.PickupItem);
+	}
+}
+
 void UGameAudioSubsystem::PlayPlayerGainAttributeSFX()
 {
 	if (AudioSettings)

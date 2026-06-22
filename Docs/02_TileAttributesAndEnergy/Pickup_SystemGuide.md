@@ -18,7 +18,7 @@
 10. 如果本次敌人攻击造成 HP 伤害，伤害应用后会再次尝试拾取当前格。这个二次尝试用于覆盖玩家满血站在回血道具上时，第一次拾取因 `Heal()` 无效果而不消耗道具，随后受伤后应立刻吃掉脚下回血道具的情况。
 11. `AGridPickupManager::TryCollectPickupAt(CurrentGridCoord, PlayerPawn)` 查找该格道具并调用 `TryCollect()`。
 12. `AGridHealthPickupActor` 调用玩家的 `UPlayerAttributeComponent::Heal(HealAmount)`。
-13. 如果治疗成功，道具广播收集事件、从 Manager 注销并销毁；如果玩家满血且 `bConsumeWhenEffectFails = false`，回血道具会保留，直到后续一次拾取尝试产生实际效果。
+13. 如果治疗成功，道具播放 `PlayerAudio.PickupItem` 音效、广播收集事件、从 Manager 注销并销毁；如果玩家满血且 `bConsumeWhenEffectFails = false`，回血道具会保留，直到后续一次拾取尝试产生实际效果。
 
 拾取物不写入 `AGridManager::Tiles` 的 `OccupantType`。它们由 `AGridPickupManager` 单独按坐标维护，因此不会阻挡 `RequestMove()`。
 
@@ -58,6 +58,8 @@
 | `CanCollect(PlayerPawn)` | `BlueprintNativeEvent`，默认要求道具未被收集且玩家有效 |
 | `ApplyPickupEffect(PlayerPawn)` | `BlueprintNativeEvent`，默认返回 `false`，子类实现具体效果 |
 | `OnCollected(PlayerPawn, bEffectApplied)` | 蓝图表现事件，可播放音效、粒子或 UI 提示 |
+
+`TryCollect()` 只有在道具实际被消耗时才会播放统一拾取音效 `PlayerAudio.PickupItem`。如果效果失败且 `bConsumeWhenEffectFails = false`，例如满血玩家踩到回血道具，道具不会消耗，也不会播放拾取音效。
 
 ### AGridHealthPickupActor
 
