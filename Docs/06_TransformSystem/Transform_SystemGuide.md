@@ -144,7 +144,7 @@
 - `Source/Chessboard_Roguelike/Public/UI/TransformWheelWidget.h`
 - `Source/Chessboard_Roguelike/Private/UI/TransformWheelWidget.cpp`
 
-`UTransformWheelWidget` 是轮盘 WBP 的 C++ 基类。蓝图建议继承它，并实现：
+`UTransformWheelWidget` 是轮盘 WBP 的 C++ 基类。蓝图建议继承它；如果 WBP 中存在指定名称的控件，C++ 会自动绑定按钮、图标、名称和数量。如果 WBP 为空，C++ 会生成一套仅用于调试的默认文字按钮。
 
 | 函数 / 事件 | 说明 |
 | --- | --- |
@@ -154,19 +154,28 @@
 | `OnWheelInitialized` | 蓝图初始化事件。 |
 | `OnInventoryRefreshed` | 蓝图刷新槽位显示事件。 |
 
-推荐 WBP 树：
+推荐 WBP 树和控件命名：
 
 ```text
 WBP_TransformWheel
   Root Canvas
     WheelPanel
-      Slot_Knight
-        Icon
-        CountText
-        DisabledOverlay
-      Slot_Bishop
-      Slot_Rook
-      Slot_Queen
+      Slot_Knight        (Button)
+        Icon_Knight      (Image)
+        NameText_Knight  (TextBlock, optional)
+        CountText_Knight (TextBlock)
+      Slot_Bishop        (Button)
+        Icon_Bishop
+        NameText_Bishop
+        CountText_Bishop
+      Slot_Rook          (Button)
+        Icon_Rook
+        NameText_Rook
+        CountText_Rook
+      Slot_Queen         (Button)
+        Icon_Queen
+        NameText_Queen
+        CountText_Queen
 ```
 
 槽位规则：
@@ -174,6 +183,12 @@ WBP_TransformWheel
 - 库存大于 0：正常亮度，可点击。
 - 库存等于 0：置灰，不可点击。
 - 点击槽位只进入目标选择，不消耗资源。
+- `Icon_*` 会自动读取对应 `UChessPieceFormData.Icon`。
+- `NameText_*` 会自动显示 `UChessPieceFormData.DisplayName`，可不放。
+- `CountText_*` 会自动显示对应库存数量。
+- `Image` 建议设置为 `Hit Test Invisible`，避免挡住按钮点击。
+- 这些控件在 C++ 中使用 `BindWidgetOptional + BlueprintReadOnly` 暴露。修改 C++ 后需要重新编译并重开或刷新 `WBP_TransformWheel`，才能在事件图表的继承变量中看到它们。
+- 点击轮盘槽位调用变身请求后，会在 `TransformWheelOpenSuppressDurationAfterSelectionRequest` 时间内暂时忽略 G 键打开输入，避免 UI 点击和输入焦点变化造成轮盘闪回。
 
 ### Controller 状态机
 
@@ -293,8 +308,8 @@ IsHoverTile =
    - `TransformCancelAction`
    - `TransformRightMouseAction`
    - 可选：`MouseHoverGridParameterCollection = MPC_PlayerPosition`；未设置时会自动复用 Pawn 的 `PlayerGridParameterCollection`
-6. 在 `WBP_TransformWheel` 中 4 个槽位分别绑定对应 FormData，点击时调用 `RequestSelectTransform(FormData)`。
-7. 在 `OnInventoryRefreshed` 中读取 `Inventory->GetTransformPieceCount(Type)` 刷新数量和置灰状态。
+6. 在 `WBP_TransformWheel` 中按推荐名称创建 4 个槽位按钮、图标和数量文本。C++ 会自动按 `BP_GridPlayerController.TransformWheelForms` 的顺序绑定到 Knight、Bishop、Rook、Queen。
+7. 在 4 个 `UChessPieceFormData` 中配置 `Icon`，轮盘会自动刷新按钮图标、数量和可点击状态。
 
 ## 调试建议
 

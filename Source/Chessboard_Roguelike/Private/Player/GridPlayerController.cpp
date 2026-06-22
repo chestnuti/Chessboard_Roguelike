@@ -243,7 +243,9 @@ void AGridPlayerController::HandleUseEnergyStarted()
 
 void AGridPlayerController::HandleTransformWheelStarted()
 {
-	if (bTransformSelectionInProgress || ControlMode != EPlayerControlMode::DefaultWASD)
+	if (IsTransformWheelOpenTemporarilySuppressed()
+		|| bTransformSelectionInProgress
+		|| ControlMode != EPlayerControlMode::DefaultWASD)
 	{
 		return;
 	}
@@ -368,6 +370,31 @@ void AGridPlayerController::HandleTransformRightMouseReleased()
 	}
 }
 
+void AGridPlayerController::SuppressTransformWheelOpenAfterSelectionRequest()
+{
+	if (TransformWheelOpenSuppressDurationAfterSelectionRequest <= 0.f)
+	{
+		return;
+	}
+
+	if (const UWorld* World = GetWorld())
+	{
+		TransformWheelOpenSuppressedUntilTime =
+			World->GetTimeSeconds() + TransformWheelOpenSuppressDurationAfterSelectionRequest;
+	}
+}
+
+bool AGridPlayerController::IsTransformWheelOpenTemporarilySuppressed() const
+{
+	if (TransformWheelOpenSuppressedUntilTime <= 0.f)
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	return World && World->GetTimeSeconds() < TransformWheelOpenSuppressedUntilTime;
+}
+
 void AGridPlayerController::ShowTransformWheel()
 {
 	if (!IsLocalController() || !TransformWheelWidgetClass)
@@ -411,6 +438,8 @@ void AGridPlayerController::RefreshTransformWheel()
 
 void AGridPlayerController::RequestSelectTransform(UChessPieceFormData* FormData)
 {
+	SuppressTransformWheelOpenAfterSelectionRequest();
+
 	if (bTransformSelectionInProgress || ControlMode != EPlayerControlMode::TransformWheel || !FormData)
 	{
 		return;

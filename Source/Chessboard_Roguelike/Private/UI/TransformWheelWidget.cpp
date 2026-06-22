@@ -4,6 +4,7 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "Data/ChessPieceFormData.h"
 #include "Player/GridPlayerController.h"
@@ -26,7 +27,9 @@ void UTransformWheelWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	CacheDesignedSlotWidgets();
 	BuildDefaultWheelIfNeeded();
+	BindSlotButtonDelegates();
 	RefreshSlotLabels();
 }
 
@@ -38,7 +41,9 @@ void UTransformWheelWidget::InitializeWheel(AGridPlayerController* InOwningGridC
 		SlotForms = OwningGridController->GetTransformWheelForms();
 	}
 
+	CacheDesignedSlotWidgets();
 	BuildDefaultWheelIfNeeded();
+	BindSlotButtonDelegates();
 	RefreshSlotLabels();
 	OnWheelInitialized();
 }
@@ -46,13 +51,16 @@ void UTransformWheelWidget::InitializeWheel(AGridPlayerController* InOwningGridC
 void UTransformWheelWidget::RefreshFromInventory(UPlayerTransformInventoryComponent* InventoryComponent)
 {
 	CachedInventoryComponent = InventoryComponent;
+	CacheDesignedSlotWidgets();
 	BuildDefaultWheelIfNeeded();
+	BindSlotButtonDelegates();
 	RefreshSlotLabels();
 	OnInventoryRefreshed(InventoryComponent);
 }
 
 void UTransformWheelWidget::RequestSelectTransform(UChessPieceFormData* FormData)
 {
+
 	if (OwningGridController)
 	{
 		OwningGridController->RequestSelectTransform(FormData);
@@ -95,7 +103,9 @@ void UTransformWheelWidget::BuildDefaultWheelIfNeeded()
 	WidgetTree->RootWidget = RootCanvas;
 
 	SlotButtons.Reset();
+	SlotIcons.Reset();
 	SlotLabels.Reset();
+	SlotCountLabels.Reset();
 
 	for (int32 SlotIndex = 0; SlotIndex < TransformWheelSlotCount; ++SlotIndex)
 	{
@@ -137,7 +147,73 @@ void UTransformWheelWidget::BuildDefaultWheelIfNeeded()
 		}
 
 		SlotButtons.Add(Button);
+		SlotIcons.Add(nullptr);
 		SlotLabels.Add(Label);
+		SlotCountLabels.Add(nullptr);
+	}
+}
+
+void UTransformWheelWidget::CacheDesignedSlotWidgets()
+{
+	const bool bHasDesignedSlots = Slot_Knight || Slot_Bishop || Slot_Rook || Slot_Queen;
+	if (!bHasDesignedSlots)
+	{
+		return;
+	}
+
+	SlotButtons.Reset();
+	SlotButtons.Add(Slot_Knight);
+	SlotButtons.Add(Slot_Bishop);
+	SlotButtons.Add(Slot_Rook);
+	SlotButtons.Add(Slot_Queen);
+
+	SlotIcons.Reset();
+	SlotIcons.Add(Icon_Knight);
+	SlotIcons.Add(Icon_Bishop);
+	SlotIcons.Add(Icon_Rook);
+	SlotIcons.Add(Icon_Queen);
+
+	SlotLabels.Reset();
+	SlotLabels.Add(NameText_Knight);
+	SlotLabels.Add(NameText_Bishop);
+	SlotLabels.Add(NameText_Rook);
+	SlotLabels.Add(NameText_Queen);
+
+	SlotCountLabels.Reset();
+	SlotCountLabels.Add(CountText_Knight);
+	SlotCountLabels.Add(CountText_Bishop);
+	SlotCountLabels.Add(CountText_Rook);
+	SlotCountLabels.Add(CountText_Queen);
+}
+
+void UTransformWheelWidget::BindSlotButtonDelegates()
+{
+	for (UButton* Button : SlotButtons)
+	{
+		if (Button)
+		{
+			Button->OnClicked.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot0Clicked);
+			Button->OnClicked.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot1Clicked);
+			Button->OnClicked.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot2Clicked);
+			Button->OnClicked.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot3Clicked);
+		}
+	}
+
+	if (SlotButtons.IsValidIndex(0) && SlotButtons[0])
+	{
+		SlotButtons[0]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot0Clicked);
+	}
+	if (SlotButtons.IsValidIndex(1) && SlotButtons[1])
+	{
+		SlotButtons[1]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot1Clicked);
+	}
+	if (SlotButtons.IsValidIndex(2) && SlotButtons[2])
+	{
+		SlotButtons[2]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot2Clicked);
+	}
+	if (SlotButtons.IsValidIndex(3) && SlotButtons[3])
+	{
+		SlotButtons[3]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot3Clicked);
 	}
 }
 
@@ -176,6 +252,18 @@ void UTransformWheelWidget::RefreshSlotLabels()
 		if (SlotLabels[SlotIndex])
 		{
 			SlotLabels[SlotIndex]->SetText(LabelText);
+		}
+
+		if (SlotCountLabels.IsValidIndex(SlotIndex) && SlotCountLabels[SlotIndex])
+		{
+			SlotCountLabels[SlotIndex]->SetText(FText::AsNumber(Count));
+		}
+
+		if (SlotIcons.IsValidIndex(SlotIndex) && SlotIcons[SlotIndex])
+		{
+			UTexture2D* IconTexture = FormData ? FormData->Icon.Get() : nullptr;
+			SlotIcons[SlotIndex]->SetBrushFromTexture(IconTexture, true);
+			SlotIcons[SlotIndex]->SetVisibility(IconTexture ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		}
 
 		if (SlotButtons.IsValidIndex(SlotIndex) && SlotButtons[SlotIndex])

@@ -141,6 +141,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input|Transform")
 	TObjectPtr<UInputAction> TransformRightMouseAction;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input|Transform", meta = (ClampMin = "0.0"))
+	float TransformWheelOpenSuppressDurationAfterSelectionRequest = 0.35f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
 	TSubclassOf<UPlayerAttributeHUDWidget> PlayerAttributeHUDClass;
 
@@ -208,6 +211,8 @@ private:
 	void HandleTransformCancel();
 	void HandleTransformRightMouseStarted();
 	void HandleTransformRightMouseReleased();
+	void SuppressTransformWheelOpenAfterSelectionRequest();
+	bool IsTransformWheelOpenTemporarilySuppressed() const;
 	UFUNCTION()
 	void HandlePauseResumeRequested();
 	UFUNCTION()
@@ -245,6 +250,7 @@ private:
 	bool bEdgeScrollEnabled = false;
 	bool bIsCameraDragging = false;
 	bool bTransformSelectionInProgress = false;
+	float TransformWheelOpenSuppressedUntilTime = -1.f;
 	bool bRestoreCameraAfterTransformMove = false;
 	bool bRightMousePressedForTransform = false;
 	bool bHasWrittenMouseHoverGridParameters = false;

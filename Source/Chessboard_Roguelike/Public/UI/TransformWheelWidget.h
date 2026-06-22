@@ -7,6 +7,7 @@
 class AGridPlayerController;
 class UChessPieceFormData;
 class UButton;
+class UImage;
 class UTextBlock;
 class UPlayerTransformInventoryComponent;
 
@@ -50,7 +51,61 @@ private:
 	TArray<TObjectPtr<UButton>> SlotButtons;
 
 	UPROPERTY(Transient)
+	TArray<TObjectPtr<UImage>> SlotIcons;
+
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextBlock>> SlotLabels;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTextBlock>> SlotCountLabels;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UButton> Slot_Knight;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UButton> Slot_Bishop;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UButton> Slot_Rook;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UButton> Slot_Queen;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UImage> Icon_Knight;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UImage> Icon_Bishop;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UImage> Icon_Rook;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UImage> Icon_Queen;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> NameText_Knight;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> NameText_Bishop;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> NameText_Rook;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> NameText_Queen;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> CountText_Knight;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> CountText_Bishop;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> CountText_Rook;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Transform Wheel|Bound Widgets", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
+	TObjectPtr<UTextBlock> CountText_Queen;
 
 	UFUNCTION()
 	void HandleSlot0Clicked();
@@ -65,6 +120,8 @@ private:
 	void HandleSlot3Clicked();
 
 	void BuildDefaultWheelIfNeeded();
+	void CacheDesignedSlotWidgets();
+	void BindSlotButtonDelegates();
 	void HandleSlotClicked(int32 SlotIndex);
 	void RefreshSlotLabels();
 };
