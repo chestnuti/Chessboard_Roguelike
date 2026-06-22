@@ -16,6 +16,7 @@
 #include "Player/GridPawn.h"
 #include "Player/PlayerAttributeComponent.h"
 #include "Player/PlayerTransformInventoryComponent.h"
+#include "UI/PauseMenuWidget.h"
 #include "Tutorial/TutorialFlowComponent.h"
 #include "UI/PlayerAttributeHUDWidget.h"
 #include "UI/TransformWheelWidget.h"
@@ -31,6 +32,7 @@ AGridPlayerController::AGridPlayerController()
 	TutorialFlowComponent = CreateDefaultSubobject<UTutorialFlowComponent>(TEXT("TutorialFlowComponent"));
 
 	PlayerAttributeHUDClass = UPlayerAttributeHUDWidget::StaticClass();
+	PauseMenuClass = UPauseMenuWidget::StaticClass();
 
 	// Prefer the authored WBP asset when present, with the native widget as a safe fallback.
 	static ConstructorHelpers::FClassFinder<UPlayerAttributeHUDWidget> PlayerAttributeHUDWidgetClass(
@@ -38,6 +40,13 @@ AGridPlayerController::AGridPlayerController()
 	if (PlayerAttributeHUDWidgetClass.Succeeded())
 	{
 		PlayerAttributeHUDClass = PlayerAttributeHUDWidgetClass.Class;
+	}
+
+	static ConstructorHelpers::FClassFinder<UPauseMenuWidget> PauseMenuWidgetClass(
+		TEXT("/Game/UI/WBP_PauseMenu"));
+	if (PauseMenuWidgetClass.Succeeded())
+	{
+		PauseMenuClass = PauseMenuWidgetClass.Class;
 	}
 }
 
@@ -819,6 +828,53 @@ TArray<UChessPieceFormData*> AGridPlayerController::GetTransformWheelForms() con
 	return Forms;
 }
 
+void AGridPlayerController::ShowPauseMenu()
+{
+	if (!IsLocalController() || !PauseMenuClass)
+	{
+		return;
+	}
+
+	if (!PauseMenuWidget)
+	{
+		PauseMenuWidget = CreateWidget<UPauseMenuWidget>(this, PauseMenuClass);
+		if (PauseMenuWidget)
+		{
+			PauseMenuWidget->OnResumeRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseResumeRequested);
+			PauseMenuWidget->OnResumeRequested.AddDynamic(this, &AGridPlayerController::HandlePauseResumeRequested);
+			PauseMenuWidget->OnBackRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseBackRequested);
+			PauseMenuWidget->OnBackRequested.AddDynamic(this, &AGridPlayerController::HandlePauseBackRequested);
+			PauseMenuWidget->OnSettingsRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseSettingsRequested);
+			PauseMenuWidget->OnSettingsRequested.AddDynamic(this, &AGridPlayerController::HandlePauseSettingsRequested);
+			PauseMenuWidget->OnMainMenuRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseMainMenuRequested);
+			PauseMenuWidget->OnMainMenuRequested.AddDynamic(this, &AGridPlayerController::HandlePauseMainMenuRequested);
+			PauseMenuWidget->OnQuitGameRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseQuitGameRequested);
+			PauseMenuWidget->OnQuitGameRequested.AddDynamic(this, &AGridPlayerController::HandlePauseQuitGameRequested);
+		}
+	}
+
+	if (PauseMenuWidget && !PauseMenuWidget->IsInViewport())
+	{
+		PauseMenuWidget->AddToViewport(40);
+	}
+}
+
+void AGridPlayerController::ClosePauseMenu()
+{
+	if (!PauseMenuWidget)
+	{
+		return;
+	}
+
+	PauseMenuWidget->OnResumeRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseResumeRequested);
+	PauseMenuWidget->OnBackRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseBackRequested);
+	PauseMenuWidget->OnSettingsRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseSettingsRequested);
+	PauseMenuWidget->OnMainMenuRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseMainMenuRequested);
+	PauseMenuWidget->OnQuitGameRequested.RemoveDynamic(this, &AGridPlayerController::HandlePauseQuitGameRequested);
+	PauseMenuWidget->RemoveFromParent();
+	PauseMenuWidget = nullptr;
+}
+
 void AGridPlayerController::HandleUseEnergyFinished()
 {
 	EndConversionEnergyCameraZoom();
@@ -831,4 +887,31 @@ void AGridPlayerController::HandleSwitchEnergyType()
 	{
 		GridPawn->ConversionEnergyComponent->CycleHeldConversionEnergyType();
 	}
+}
+
+void AGridPlayerController::HandlePauseResumeRequested()
+{
+	PauseMenuWidget = nullptr;
+	OnPauseResumeRequested.Broadcast();
+}
+
+void AGridPlayerController::HandlePauseBackRequested()
+{
+	OnPauseBackRequested.Broadcast();
+}
+
+void AGridPlayerController::HandlePauseSettingsRequested()
+{
+	OnPauseSettingsRequested.Broadcast();
+}
+
+void AGridPlayerController::HandlePauseMainMenuRequested()
+{
+	PauseMenuWidget = nullptr;
+	OnPauseMainMenuRequested.Broadcast();
+}
+
+void AGridPlayerController::HandlePauseQuitGameRequested()
+{
+	OnPauseQuitGameRequested.Broadcast();
 }

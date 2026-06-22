@@ -13,6 +13,7 @@
 | 教学关卡 | [05_TutorialLevels](05_TutorialLevels/README.md) | 固定 10x10 教学地图、教学 DataAsset、5 张 Map 资产和验证脚本 |
 | 变身棋子系统 | [06_TransformSystem](06_TransformSystem/README.md) | 变身棋子背包、4 槽轮盘、鼠标选格移动、边缘滚屏、一次性变身消耗规则 |
 | 音频系统 | [07_AudioSystem](07_AudioSystem/README.md) | BGM 淡入淡出、玩家/敌人/关卡/UI 音效、DataAsset 配置、随机音效池 |
+| UI 菜单系统 | [08_UIMenus](08_UIMenus/README.md) | 主菜单 Setting 入口、Setting 菜单、Pause 菜单、按钮事件广播、音量滑条和蓝图接入注意点 |
 
 ## 推荐阅读路径
 
@@ -21,7 +22,8 @@
 3. 接着读 [战斗与敌人](03_CombatAndEnemies/README.md)，理解攻击、敌人行动和相关边界。
 4. 需要验证规则教学时，读 [教学关卡](05_TutorialLevels/README.md)，了解固定地图和教学资产。
 5. 需要接入 BGM 或事件音效时，读 [音频系统](07_AudioSystem/README.md)，了解配置资产和触发点。
-6. 最后读 [项目规划](04_ProjectPlanning/README.md)，对照 GDD、技术实现需求、当前功能和后续任务。
+6. 需要接入主菜单设置、暂停菜单或音量滑条时，读 [UI 菜单系统](08_UIMenus/README.md)，了解 Widget 绑定、Controller 事件转发和蓝图接入要求。
+7. 最后读 [项目规划](04_ProjectPlanning/README.md)，对照 GDD、技术实现需求、当前功能和后续任务。
 
 ## 维护约定
 

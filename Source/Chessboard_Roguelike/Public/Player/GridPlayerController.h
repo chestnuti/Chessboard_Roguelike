@@ -11,12 +11,14 @@ class UInputAction;
 class UInputMappingContext;
 class UCombatCameraDirectorComponent;
 class UMaterialParameterCollection;
+class UPauseMenuWidget;
 class UPlayerAttributeHUDWidget;
 class UTutorialFlowComponent;
 class UTransformWheelWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTransformWheelOpened);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTransformSelectedForTutorial, UChessPieceFormData*, FormData);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPauseMenuRequestReceived);
 
 UENUM(BlueprintType)
 enum class EPlayerControlMode : uint8
@@ -77,11 +79,32 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Transform")
 	TArray<UChessPieceFormData*> GetTransformWheelForms() const;
 
+	UFUNCTION(BlueprintCallable, Category = "UI|Pause")
+	void ShowPauseMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "UI|Pause")
+	void ClosePauseMenu();
+
 	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
 	FOnTransformWheelOpened OnTransformWheelOpened;
 
 	UPROPERTY(BlueprintAssignable, Category = "Tutorial|Events")
 	FOnTransformSelectedForTutorial OnTransformSelectedForTutorial;
+
+	UPROPERTY(BlueprintAssignable, Category = "UI|Pause|Events")
+	FOnPauseMenuRequestReceived OnPauseResumeRequested;
+
+	UPROPERTY(BlueprintAssignable, Category = "UI|Pause|Events")
+	FOnPauseMenuRequestReceived OnPauseBackRequested;
+
+	UPROPERTY(BlueprintAssignable, Category = "UI|Pause|Events")
+	FOnPauseMenuRequestReceived OnPauseSettingsRequested;
+
+	UPROPERTY(BlueprintAssignable, Category = "UI|Pause|Events")
+	FOnPauseMenuRequestReceived OnPauseMainMenuRequested;
+
+	UPROPERTY(BlueprintAssignable, Category = "UI|Pause|Events")
+	FOnPauseMenuRequestReceived OnPauseQuitGameRequested;
 
 protected:
 	// Mapping context and actions are assigned in Blueprint/Data assets so bindings stay data-driven.
@@ -120,6 +143,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
 	TSubclassOf<UPlayerAttributeHUDWidget> PlayerAttributeHUDClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|Pause")
+	TSubclassOf<UPauseMenuWidget> PauseMenuClass;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI|Transform")
 	TSubclassOf<UTransformWheelWidget> TransformWheelWidgetClass;
@@ -161,6 +187,9 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "UI")
 	TObjectPtr<UPlayerAttributeHUDWidget> PlayerAttributeHUD;
 
+	UPROPERTY(BlueprintReadOnly, Category = "UI|Pause")
+	TObjectPtr<UPauseMenuWidget> PauseMenuWidget;
+
 	UPROPERTY(BlueprintReadOnly, Category = "UI|Transform")
 	TObjectPtr<UTransformWheelWidget> TransformWheelWidget;
 
@@ -179,6 +208,16 @@ private:
 	void HandleTransformCancel();
 	void HandleTransformRightMouseStarted();
 	void HandleTransformRightMouseReleased();
+	UFUNCTION()
+	void HandlePauseResumeRequested();
+	UFUNCTION()
+	void HandlePauseBackRequested();
+	UFUNCTION()
+	void HandlePauseSettingsRequested();
+	UFUNCTION()
+	void HandlePauseMainMenuRequested();
+	UFUNCTION()
+	void HandlePauseQuitGameRequested();
 	void ShowTransformWheel();
 	void HideTransformWheel();
 	void RefreshTransformWheel();

@@ -1,6 +1,7 @@
 #include "UI/PlayerAttributeHUDWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/Button.h"
 #include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
@@ -13,6 +14,7 @@
 #include "PCG/DungeonRunManager.h"
 #include "Player/ConversionEnergyComponent.h"
 #include "Player/PlayerAttributeComponent.h"
+#include "UI/SettingsMenuWidget.h"
 
 namespace
 {
@@ -41,8 +43,19 @@ void UPlayerAttributeHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	if (!SettingsMenuClass)
+	{
+		SettingsMenuClass = USettingsMenuWidget::StaticClass();
+	}
+
 	// Gives the native class a minimal visible HUD even if the Widget Blueprint has no designer tree yet.
 	BuildFallbackWidgetTreeIfNeeded();
+
+	if (SettingButton)
+	{
+		SettingButton->OnClicked.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleSettingButtonClicked);
+		SettingButton->OnClicked.AddDynamic(this, &UPlayerAttributeHUDWidget::HandleSettingButtonClicked);
+	}
 
 	if (!AttributeComponent)
 	{
@@ -69,6 +82,12 @@ void UPlayerAttributeHUDWidget::NativeConstruct()
 
 void UPlayerAttributeHUDWidget::NativeDestruct()
 {
+	CloseSettingsMenu();
+	if (SettingButton)
+	{
+		SettingButton->OnClicked.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleSettingButtonClicked);
+	}
+
 	StopDungeonRunTimerRefresh();
 	UnbindFromEnemyManager();
 	UnbindFromDungeonRunManager();
@@ -215,6 +234,45 @@ FText UPlayerAttributeHUDWidget::GetDungeonTimerText() const
 	return FText::FromString(FString::Printf(TEXT("Run Time: %02d:%02d"), Minutes, Seconds));
 }
 
+void UPlayerAttributeHUDWidget::OpenSettingsMenu()
+{
+	if (!SettingsMenuClass)
+	{
+		SettingsMenuClass = USettingsMenuWidget::StaticClass();
+	}
+
+	if (!SettingsMenu && SettingsMenuClass)
+	{
+		SettingsMenu = CreateWidget<USettingsMenuWidget>(GetOwningPlayer(), SettingsMenuClass);
+		if (SettingsMenu)
+		{
+			SettingsMenu->OnSettingsBackRequested.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleSettingsBackRequested);
+			SettingsMenu->OnSettingsBackRequested.AddDynamic(this, &UPlayerAttributeHUDWidget::HandleSettingsBackRequested);
+		}
+	}
+
+	if (SettingsMenu)
+	{
+		SettingsMenu->RefreshFromAudioSettings();
+		if (!SettingsMenu->IsInViewport())
+		{
+			SettingsMenu->AddToViewport(50);
+		}
+	}
+}
+
+void UPlayerAttributeHUDWidget::CloseSettingsMenu()
+{
+	if (!SettingsMenu)
+	{
+		return;
+	}
+
+	SettingsMenu->OnSettingsBackRequested.RemoveDynamic(this, &UPlayerAttributeHUDWidget::HandleSettingsBackRequested);
+	SettingsMenu->RemoveFromParent();
+	SettingsMenu = nullptr;
+}
+
 void UPlayerAttributeHUDWidget::HandlePlayerAttributeChanged(int32 NewConstructValue, int32 NewAcidValue)
 {
 	// Values are pulled from the component to keep one formatting path for initial and event refreshes.
@@ -260,6 +318,16 @@ void UPlayerAttributeHUDWidget::HandleEnemyCountChanged(int32 AliveEnemyCount)
 	RefreshEnemyCountDisplay();
 }
 
+void UPlayerAttributeHUDWidget::HandleSettingButtonClicked()
+{
+	OpenSettingsMenu();
+}
+
+void UPlayerAttributeHUDWidget::HandleSettingsBackRequested()
+{
+	CloseSettingsMenu();
+}
+
 void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 {
 	if (!WidgetTree)
@@ -281,6 +349,24 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 		{
 			EnemyCountText = CreateFallbackTextBlock(TEXT("EnemyCountText"), NSLOCTEXT("PlayerAttributeHUD", "EnemyCountInitialText", "Enemies: 0"));
 		}
+		if (!SettingButton && WidgetTree && WidgetTree->RootWidget)
+		{
+			SettingButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SettingButton"));
+			UTextBlock* SettingLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SettingButtonLabel"));
+			if (SettingButton)
+			{
+				if (SettingLabel)
+				{
+					SettingLabel->SetText(NSLOCTEXT("PlayerAttributeHUD", "SettingButtonLabel", "Setting"));
+					SettingButton->AddChild(SettingLabel);
+				}
+
+				if (UPanelWidget* RootPanel = Cast<UPanelWidget>(WidgetTree->RootWidget))
+				{
+					RootPanel->AddChild(SettingButton);
+				}
+			}
+		}
 		return;
 	}
 
@@ -297,6 +383,8 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 	AcidText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("AcidText"));
 	AcidProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("AcidProgressBar"));
 	EnergyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("EnergyText"));
+	SettingButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SettingButton"));
+	UTextBlock* SettingLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SettingButtonLabel"));
 
 	if (LevelText)
 	{
@@ -353,6 +441,16 @@ void UPlayerAttributeHUDWidget::BuildFallbackWidgetTreeIfNeeded()
 	{
 		EnergyText->SetText(NSLOCTEXT("PlayerAttributeHUD", "EnergyInitialText", "Energy: None"));
 		RootBox->AddChildToVerticalBox(EnergyText);
+	}
+
+	if (SettingButton)
+	{
+		if (SettingLabel)
+		{
+			SettingLabel->SetText(NSLOCTEXT("PlayerAttributeHUD", "SettingButtonLabel", "Setting"));
+			SettingButton->AddChild(SettingLabel);
+		}
+		RootBox->AddChildToVerticalBox(SettingButton);
 	}
 }
 

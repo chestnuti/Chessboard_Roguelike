@@ -46,6 +46,37 @@ UGameAudioSettingsDataAsset* UGameAudioSubsystem::GetAudioSettings() const
 	return AudioSettings;
 }
 
+void UGameAudioSubsystem::SetBGMVolume(float InVolume)
+{
+	BGMVolume = FMath::Clamp(InVolume, 0.0f, 1.0f);
+	if (CurrentBGMComponent)
+	{
+		CurrentBGMComponent->SetVolumeMultiplier(BGMVolume);
+	}
+}
+
+float UGameAudioSubsystem::GetBGMVolume() const
+{
+	return BGMVolume;
+}
+
+void UGameAudioSubsystem::SetSFXVolume(float InVolume)
+{
+	SFXVolume = FMath::Clamp(InVolume, 0.0f, 1.0f);
+	for (UAudioComponent* AudioComponent : ActivePersistentSFXComponents)
+	{
+		if (AudioComponent)
+		{
+			AudioComponent->SetVolumeMultiplier(SFXVolume);
+		}
+	}
+}
+
+float UGameAudioSubsystem::GetSFXVolume() const
+{
+	return SFXVolume;
+}
+
 void UGameAudioSubsystem::PlayMainMenuBGM(float FadeTime)
 {
 	PlayBGM(AudioSettings ? AudioSettings->MainMenuBGM.Get() : nullptr, FadeTime);
@@ -85,7 +116,7 @@ void UGameAudioSubsystem::PlayBGM(USoundBase* Music, float FadeTime)
 	CurrentBGMComponent = UGameplayStatics::CreateSound2D(
 		World,
 		Music,
-		1.0f,
+		BGMVolume,
 		1.0f,
 		0.0f,
 		nullptr,
@@ -404,7 +435,7 @@ UAudioComponent* UGameAudioSubsystem::CreatePersistent2DSFXComponent(USoundBase*
 	return UGameplayStatics::CreateSound2D(
 		World,
 		Sound,
-		1.0f,
+		SFXVolume,
 		1.0f,
 		0.0f,
 		nullptr,
@@ -442,7 +473,7 @@ void UGameAudioSubsystem::PlayWorldSFX(const FGameSoundSet& SoundSet, FVector Wo
 
 	AudioComponent->SetSound(Sound);
 	AudioComponent->SetWorldLocation(WorldLocation);
-	AudioComponent->SetVolumeMultiplier(1.0f);
+	AudioComponent->SetVolumeMultiplier(SFXVolume);
 	AudioComponent->SetPitchMultiplier(1.0f);
 	AudioComponent->bAutoDestroy = false;
 	AudioComponent->bStopWhenOwnerDestroyed = false;

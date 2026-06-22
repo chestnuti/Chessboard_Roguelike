@@ -8,11 +8,13 @@
 
 class ADungeonRunManager;
 class AGridEnemyManager;
+class UButton;
 class UConversionEnergyComponent;
 class UImage;
 class UMaterialInstanceDynamic;
 class UPlayerAttributeComponent;
 class UProgressBar;
+class USettingsMenuWidget;
 class UTextBlock;
 
 // Read-only attribute HUD that refreshes from UPlayerAttributeComponent events instead of Tick.
@@ -52,6 +54,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dungeon")
 	FText GetDungeonTimerText() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Settings")
+	void OpenSettingsMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Settings")
+	void CloseSettingsMenu();
 
 protected:
 	virtual void NativeConstruct() override;
@@ -94,6 +102,12 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Enemy")
 	TObjectPtr<UTextBlock> EnemyCountText;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Settings")
+	TSubclassOf<USettingsMenuWidget> SettingsMenuClass;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Settings")
+	TObjectPtr<UButton> SettingButton;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UPlayerAttributeComponent> AttributeComponent;
@@ -112,6 +126,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> AcidAttributeMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USettingsMenuWidget> SettingsMenu;
 
 	FTimerHandle DungeonTimerRefreshHandle;
 
@@ -135,6 +152,12 @@ private:
 
 	UFUNCTION()
 	void HandleEnemyCountChanged(int32 AliveEnemyCount);
+
+	UFUNCTION()
+	void HandleSettingButtonClicked();
+
+	UFUNCTION()
+	void HandleSettingsBackRequested();
 
 	void BuildFallbackWidgetTreeIfNeeded();
 	void BindToAttributeComponent(UPlayerAttributeComponent* InAttributeComponent);

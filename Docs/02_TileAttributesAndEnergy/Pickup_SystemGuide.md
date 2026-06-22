@@ -13,9 +13,12 @@
 5. 生成的拾取物调用 `InitializeOnGrid(GridManager, CandidateCoord)`，并注册到 `AGridPickupManager`。
 6. 玩家通过 `AGridPawn::TryMove()` 或击杀敌人后进入新格。
 7. 移动成功后，Pawn 先结算地块进入效果，再调用 `ResolvePickupAtCurrentTile()`。
-8. `AGridPickupManager::TryCollectPickupAt(CurrentGridCoord, PlayerPawn)` 查找该格道具并调用 `TryCollect()`。
-9. `AGridHealthPickupActor` 调用玩家的 `UPlayerAttributeComponent::Heal(HealAmount)`。
-10. 如果治疗成功，道具广播收集事件、从 Manager 注销并销毁；如果玩家满血且 `bConsumeWhenEffectFails = false`，回血道具会保留。
+8. 如果玩家攻击敌人但未击杀，失败攻击视觉会回退到原格；回退完成后同样调用 `ResolvePickupAtCurrentTile()`，允许结算原格上的拾取物。
+9. 敌人对玩家应用 HP 伤害前，`UCombatResolverComponent::ResolveEnemyMeleeAttack()` 会先调用 `PlayerPawn->ResolvePickupAtCurrentTile()`，确保“踩在道具上同时受击”时先执行拾取逻辑。
+10. 如果本次敌人攻击造成 HP 伤害，伤害应用后会再次尝试拾取当前格。这个二次尝试用于覆盖玩家满血站在回血道具上时，第一次拾取因 `Heal()` 无效果而不消耗道具，随后受伤后应立刻吃掉脚下回血道具的情况。
+11. `AGridPickupManager::TryCollectPickupAt(CurrentGridCoord, PlayerPawn)` 查找该格道具并调用 `TryCollect()`。
+12. `AGridHealthPickupActor` 调用玩家的 `UPlayerAttributeComponent::Heal(HealAmount)`。
+13. 如果治疗成功，道具广播收集事件、从 Manager 注销并销毁；如果玩家满血且 `bConsumeWhenEffectFails = false`，回血道具会保留，直到后续一次拾取尝试产生实际效果。
 
 拾取物不写入 `AGridManager::Tiles` 的 `OccupantType`。它们由 `AGridPickupManager` 单独按坐标维护，因此不会阻挡 `RequestMove()`。
 
@@ -70,7 +73,7 @@
 - 默认 `HealAmount = 1`。
 - `ApplyPickupEffect()` 调用玩家 `UPlayerAttributeComponent::Heal(HealAmount)`。
 
-如果玩家 HP 已满，`Heal()` 返回 `false`。默认情况下回血道具不会被消耗，玩家之后再次进入该格仍可拾取。
+如果玩家 HP 已满，`Heal()` 返回 `false`。默认情况下回血道具不会被消耗，玩家之后再次进入该格仍可拾取。敌人造成 HP 伤害后会再次尝试结算当前格拾取物，因此满血玩家站在回血道具上攻击失败并受击时，道具会在受伤后立即生效并被消耗。
 
 ### AGridPickupManager
 
@@ -179,6 +182,7 @@ AGridPickupActor
 3. 道具是否已注册到 `PickupsByCoord`。
 4. 玩家 Pawn 是否存在 `UPlayerAttributeComponent`。
 5. 玩家是否已经满血；默认回血道具满血时不会消耗也不会广播 HP 变化。
+6. 如果玩家满血站在回血道具上并在敌方回合受击，确认伤害路径是否经过 `UCombatResolverComponent::ResolveEnemyMeleeAttack()` 或 `ApplyRangedAttackDamage()`；这些路径会在 HP 伤害后再次调用 `ResolvePickupAtCurrentTile()`。
 
 ### 道具挡住玩家移动
 

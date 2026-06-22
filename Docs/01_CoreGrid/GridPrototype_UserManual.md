@@ -96,12 +96,15 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 - `AutoAdvanceDelay`: 自动进入下一关前等待的秒数。
 - `OnDungeonLevelStarted`: 关卡开始事件。
 - `OnDungeonLevelCompleted`: 关卡完成事件，参数为已完成关卡和下一关编号。
+- `OnDungeonRunEnded`: 正式 PCG Run 因玩家死亡结束时广播，参数为最终关卡和整局用时。
 
 常用函数：
 
 - `StartLevel(LevelIndex)`: 开始指定关卡，并清理上一关运行时敌人和拾取物。
 - `AdvanceToNextLevel()`: 进入下一关。
 - `CompleteCurrentLevel()`: 标记本关完成，设置 `Victory` 并广播完成事件。
+- `GetCurrentLevelDisplayIndex()`: 返回 UI 应显示的关卡编号。
+- `GetCurrentRunElapsedSeconds()`: 返回正式 PCG Run 从开始到当前或死亡时的整局用时。
 
 推荐配置：
 
@@ -114,6 +117,8 @@ PCG 地牢关卡建议使用 `ADungeonRunManager` 作为统一入口，而不是
 7. 保持 `SeedMode = RandomSeedPerLevelStart` 可让每次开始都使用不同地图；需要复现同一地图时切换为 `ConfiguredSeed` 并记录 `CurrentRunSeed` / DataAsset `Seed`。
 
 如果希望玩家点击按钮进入下一关，让 UI 监听 `OnDungeonLevelCompleted`，显示胜利面板，并在按钮点击时调用 `AdvanceToNextLevel()`。如果希望自动推进，设置 `bAutoAdvanceToNextLevel = true`。
+
+正式 PCG Run 的计时不会随关卡推进重置。`ADungeonRunManager` 在第一关成功开始时启动计时，在玩家 HP 归零并触发 `OnPlayerDefeated` 后停止计时。每次成功进入新关卡时，`URunRecordBlueprintLibrary` 会把“到达当前关卡所用时间”写入 `URunRecordSaveGame`；只有到达更远关卡，或更快到达历史最远关卡时才覆盖存档。开始菜单可以使用 `UStartMenuRunRecordWidget`，或直接调用 `LoadRunRecordStats()` 显示最远关卡和最短到达用时。
 
 ## GridSettings 配置
 
@@ -403,6 +408,8 @@ L-System 符号：
 - 开始视觉插值。
 - 插值结束后调用 `TurnManager->EndPlayerAction()`。
 
+玩家攻击敌人但未击杀时不会进入目标格，也不会触发目标格地块效果。失败攻击视觉回退到原格后，会调用 `ResolvePickupAtCurrentTile()` 结算原格拾取物；敌人对玩家造成 HP 伤害前也会先尝试结算当前格拾取物，并在 HP 伤害后再重试一次，用于处理满血站在回血道具上受击的情况。
+
 非法移动后：
 
 - 不改变 `CurrentGridCoord`。
@@ -601,6 +608,9 @@ void AGridPlayerController::MoveRight()
 - `ConstructProgressBar`
 - `AcidProgressBar`
 - `EnergyText`
+- `LevelText`
+- `TimerText`
+- `EnemyCountText`
 
 可调用函数：
 
@@ -609,6 +619,10 @@ void AGridPlayerController::MoveRight()
 - `InitializeFromConversionEnergyComponent(InEnergyComponent)`: 绑定地块转换能量组件。
 - `RefreshConversionEnergyDisplay()`: 手动刷新能量显示。
 - `GetConversionEnergyStatusText()`: 返回当前能量状态文本，可用于蓝图 Text 绑定。
+- `InitializeFromDungeonRunManager(InDungeonRunManager)`: 绑定当前地牢 Run 管理器。
+- `RefreshDungeonDisplay()`: 手动刷新当前关卡和整局用时显示。
+- `GetDungeonTimerText()`: 返回整局 Run 计时文本。
+- `RefreshEnemyCountDisplay()`: 手动刷新剩余敌人数显示。
 
 行为：
 
@@ -618,6 +632,9 @@ void AGridPlayerController::MoveRight()
 - HUD 监听 `OnPlayerAttributeChanged`，不使用 Tick 轮询。
 - HUD 监听 `OnPlayerHealthChanged` 刷新 HP 文本和进度条。
 - HUD 监听 `OnConversionEnergyChanged` 刷新 `EnergyText`，显示 `Energy: None`、`Energy: Construct` 或 `Energy: Acid`。
+- HUD 绑定 `ADungeonRunManager` 后显示当前关卡编号和整局 Run 用时。计时从正式 PCG 关卡开始，跨关卡持续，玩家死亡后停止。
+- HUD 绑定 `AGridEnemyManager::OnEnemyCountChanged` 刷新 `EnemyCountText`，显示 `Enemies: N`。
+- 如果 Widget Blueprint 已有设计器树但缺少 `LevelText`、`TimerText` 或 `EnemyCountText`，C++ 会在运行时创建缺失的文本控件并挂到根 Panel 下。
 
 ## 常见修改方式
 

@@ -49,6 +49,7 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 | `ExecuteEnemyTurn()` | 执行一轮敌方行动 |
 | `GetAliveEnemies()` | 返回当前存活敌人列表 |
 | `OnAllEnemiesCleared` | 敌人全灭事件。最后一个敌人死亡后广播，`ADungeonRunManager` 会监听它并完成当前关卡 |
+| `OnEnemyCountChanged` | 存活敌人数变化事件。注册、注销、重建、清空或敌人死亡后广播当前 `GetAliveEnemies().Num()`，HUD 可监听它刷新剩余敌人数 |
 
 ## EnemyPawn 新增 API
 

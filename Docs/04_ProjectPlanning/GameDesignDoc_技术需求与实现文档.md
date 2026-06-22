@@ -273,14 +273,18 @@ FinalKillThreshold = Max(1, BaseKillThreshold + Candidate.Depth * KillThresholdB
 - `bAutoAdvanceToNextLevel`：胜利后是否自动进入下一关。
 - `AutoAdvanceDelay`：自动进入下一关前的延迟秒数。
 - `RuntimeDungeonGenerationSettings`：运行时复制出的临时 `UDungeonGenerationSettings`，用于承载本关派生参数，不直接修改原始 DataAsset。
+- `bRunTimerRunning` / `RunStartTimeSeconds` / `CompletedRunElapsedSeconds`：正式 PCG Run 的整局计时状态。计时从第一关成功开始后启动，跨关卡持续，玩家死亡后冻结。
 
 核心函数：
 
 - `StartLevel(LevelIndex)`：开始指定关卡。内部会清理上一关敌人和拾取物，按关卡数构造运行时设置，然后执行单关生成和初始化。
 - `AdvanceToNextLevel()`：进入 `CurrentDungeonLevel + 1`。
 - `CompleteCurrentLevel()`：标记当前关完成，设置 `ETurnState::Victory`，广播 `OnDungeonLevelCompleted`，并按配置决定是否延迟自动推进。
+- `GetCurrentLevelDisplayIndex()`：返回 UI 应显示的关卡编号；教学固定关卡使用 `TutorialLevelIndex + 1`，正式 PCG 关卡使用 `CurrentDungeonLevel`。
+- `GetCurrentRunElapsedSeconds()` / `IsRunTimerRunning()`：读取整局 Run 用时和计时状态。
 - `OnDungeonLevelStarted(LevelIndex)`：关卡开始事件，供 UI 或蓝图刷新关卡显示。
 - `OnDungeonLevelCompleted(CompletedLevelIndex, NextLevelIndex)`：关卡完成事件，供 UI 显示胜利面板或“下一关”按钮。
+- `OnDungeonRunEnded(FinalLevelIndex, ElapsedSeconds)`：玩家死亡导致正式 Run 结束时广播，供 HUD 停止刷新计时或失败界面显示总用时。
 
 `UDungeonGenerationSettings.LevelScaling` 控制关卡缩放：
 
@@ -303,6 +307,13 @@ Seed = RandomSeedPerLevelStart ? RuntimeRandomSeed : BaseSeed + CurrentDungeonLe
 默认情况下，`ADungeonRunManager` 使用 `RandomSeedPerLevelStart`。每次 `StartLevel()` 或直接 `GenerateAndInitializeRun()` 时都会复制 `DungeonGenerationSettings` 到 `RuntimeDungeonGenerationSettings`，生成新的运行时 seed，并写入 `CurrentRunSeed`。需要复现固定地图时，将 `SeedMode` 切换为 `ConfiguredSeed`，并使用记录下来的 `CurrentRunSeed` 作为基础 seed 进行调试。
 
 胜利条件当前为“本关所有敌人死亡”。`AGridEnemyManager` 监听每个敌人的 `OnGridEnemyKilled`，敌人死亡后会清理无效引用；当 `GetAliveEnemies()` 为空时广播 `OnAllEnemiesCleared`。`ADungeonRunManager` 绑定该事件并调用 `CompleteCurrentLevel()`。玩家杀死最后一个敌人后，`AGridPawn::ResolvePostPlayerActionTurn()` 会检测 `Victory` / `Defeat`，避免继续进入敌人回合或把状态切回 `PlayerInput`。
+
+Run 记录通过 `URunRecordSaveGame` 和 `URunRecordBlueprintLibrary` 持久化：
+
+- Save Slot：`ChessboardRoguelikeRunRecord`。
+- 保存字段：`SchemaVersion`、`HighestLevelReached`、`BestTimeToHighestLevelSeconds`。
+- `ADungeonRunManager` 每次正式 PCG 关卡成功开始后调用记录逻辑。只有到达更远关卡，或以更短时间到达当前历史最远关卡时才覆盖存档。
+- 开始菜单可通过 `URunRecordBlueprintLibrary::LoadRunRecordStats()` 读取记录，或使用 `UStartMenuRunRecordWidget` 显示 `Farthest Level` 和 `Fastest Time`。
 
 进入下一关前必须清理运行时 Actor：
 
@@ -562,15 +573,22 @@ Seed = RandomSeedPerLevelStart ? RuntimeRandomSeed : BaseSeed + CurrentDungeonLe
 - 构成值进度
 - 酸性值进度
 - 当前持有的地块转换能量状态
+- 当前关卡编号
+- 正式 Run 的整局用时
+- 当前关卡剩余敌人数
 - 变身棋子库存计数
 - 当前回合提示
 - 敌人压制状态提示
+- 开始菜单历史记录：玩家到达的最远关卡，以及到达该最远关卡的最短用时
 
 当前工程实现：
 
-- `UPlayerAttributeHUDWidget` 可绑定 `HealthText`、`HealthProgressBar`、`ConstructText`、`AcidText`、`ConstructProgressBar`、`AcidProgressBar`。
-- HUD 监听 `OnPlayerAttributeChanged` 和 `OnPlayerHealthChanged`，不使用 Tick 轮询。
-- 如果 Widget Blueprint 没有设计器树，C++ 会创建包含 HP、构成值、酸性值的 fallback Widget Tree。
+- `UPlayerAttributeHUDWidget` 可绑定 `HealthText`、`HealthProgressBar`、`ConstructText`、`AcidText`、`ConstructProgressBar`、`AcidProgressBar`、`EnergyText`、`LevelText`、`TimerText`、`EnemyCountText`。
+- HUD 监听 `OnPlayerAttributeChanged`、`OnPlayerHealthChanged`、`OnConversionEnergyChanged`、`OnDungeonLevelStarted`、`OnDungeonRunEnded` 和 `OnEnemyCountChanged`，不使用 Tick 轮询。
+- `TimerText` 显示整局 Run 用时，不随关卡推进重置；玩家死亡后停止刷新。
+- `EnemyCountText` 通过 `AGridEnemyManager::OnEnemyCountChanged` 显示当前关卡剩余敌人数。
+- 如果 Widget Blueprint 没有设计器树，C++ 会创建包含 HP、构成值、酸性值、能量、关卡、计时和敌人数的 fallback Widget Tree。
+- 开始菜单可使用 `UStartMenuRunRecordWidget` 或 `URunRecordBlueprintLibrary` 显示最远关卡与最短到达用时。
 
 ### 10.2 战斗反馈
 

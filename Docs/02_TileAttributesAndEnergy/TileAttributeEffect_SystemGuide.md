@@ -393,6 +393,9 @@ Mark Render State Dirty = true
 | `ConstructProgressBar` | `ProgressBar` | 显示构成值比例 |
 | `AcidProgressBar` | `ProgressBar` | 显示酸性值比例 |
 | `EnergyText` | `TextBlock` | 显示当前地块转换能量状态，例如 `Energy: None`、`Energy: Construct` 或 `Energy: Acid` |
+| `LevelText` | `TextBlock` | 显示当前关卡编号，例如 `Level: 3` |
+| `TimerText` | `TextBlock` | 显示整局 Run 用时，例如 `Run Time: 02:15` |
+| `EnemyCountText` | `TextBlock` | 显示当前关卡剩余敌人数，例如 `Enemies: 4` |
 
 ### 蓝图可调用函数
 
@@ -403,6 +406,10 @@ Mark Render State Dirty = true
 | `InitializeFromConversionEnergyComponent` | `InEnergyComponent` | 绑定地块转换能量组件并刷新 |
 | `RefreshConversionEnergyDisplay` | 无 | 手动刷新能量显示 |
 | `GetConversionEnergyStatusText` | 无 | 返回当前能量状态文本，可供蓝图 Text 绑定读取 |
+| `InitializeFromDungeonRunManager` | `InDungeonRunManager` | 绑定当前 `ADungeonRunManager` 并刷新关卡、计时和敌人数 |
+| `RefreshDungeonDisplay` | 无 | 手动刷新关卡编号和整局 Run 用时 |
+| `GetDungeonTimerText` | 无 | 返回整局 Run 计时文本 |
+| `RefreshEnemyCountDisplay` | 无 | 手动刷新剩余敌人数 |
 
 HUD 行为：
 
@@ -410,6 +417,8 @@ HUD 行为：
 - 监听 `OnPlayerAttributeChanged`。
 - 监听 `OnPlayerHealthChanged`。
 - 监听 `OnConversionEnergyChanged`，能量获得、消耗或清空时刷新 `EnergyText`。
+- 绑定 `ADungeonRunManager` 后显示当前关卡编号和整局 Run 用时。用时从正式 PCG 关卡开始，跨关卡持续，玩家死亡后停止。
+- 绑定 `AGridEnemyManager::OnEnemyCountChanged` 后刷新 `EnemyCountText`。
 - 属性变化时刷新文本和进度条。
 - 不使用 Tick。
 - 不写入玩家属性或能量状态。
@@ -437,6 +446,15 @@ HUD 行为：
 3. HUD 是否成功绑定属性组件。
 4. 是否监听了 `OnPlayerAttributeChanged` 或 `OnPlayerHealthChanged`。
 5. 属性是否真的发生变化；Clamp 后无变化时不会广播。
+
+### 关卡、计时或敌人数不刷新
+
+检查顺序：
+
+1. 场景中是否存在 `ADungeonRunManager`，且 Controller 创建 HUD 后是否调用了 `InitializeFromDungeonRunManager()`。
+2. `DungeonRunManager.EnemyManager` 是否指向当前关卡使用的 `AGridEnemyManager`。
+3. 敌人生成、死亡、清空或重建时，`AGridEnemyManager::OnEnemyCountChanged` 是否广播。
+4. `WBP_PlayerAttributeHUD` 中是否存在 `LevelText`、`TimerText`、`EnemyCountText`；如果不存在，确认根 Widget 是否是可添加子控件的 Panel，供 C++ fallback 挂载缺失文本。
 
 ### Construct/Acid 只生效一次
 

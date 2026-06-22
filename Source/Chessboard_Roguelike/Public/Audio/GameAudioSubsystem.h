@@ -24,6 +24,18 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Game Audio|Settings")
 	UGameAudioSettingsDataAsset* GetAudioSettings() const;
 
+	UFUNCTION(BlueprintCallable, Category = "Game Audio|Settings", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	void SetBGMVolume(float InVolume);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Game Audio|Settings")
+	float GetBGMVolume() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Game Audio|Settings", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	void SetSFXVolume(float InVolume);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Game Audio|Settings")
+	float GetSFXVolume() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Game Audio|BGM")
 	void PlayMainMenuBGM(float FadeTime = -1.0f);
 
@@ -129,6 +141,12 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UAudioComponent>> ActivePersistentSFXComponents;
+
+	UPROPERTY(Transient)
+	float BGMVolume = 1.0f;
+
+	UPROPERTY(Transient)
+	float SFXVolume = 1.0f;
 
 	float ResolveFadeTime(float FadeTime) const;
 	USoundBase* SelectRandomSound(const FGameSoundSet& SoundSet) const;

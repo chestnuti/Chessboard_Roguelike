@@ -15,7 +15,8 @@
 7. CombatResolver 根据敌人 `Faction` 应用免疫规则，并判断有效单次伤害是否达到敌人 `KillThreshold`。
 8. 若击杀成功，Pawn 调用敌人 `Kill()`，通过 `AGridManager::ClearOccupant()` 清空敌人格，再调用 `RequestMove()` 让玩家进入该格。
 9. 若未击杀，敌人和玩家的格子占据状态都不改变，Pawn 播放一次短距离前冲再退回的失败攻击表现。
-10. 近战攻击无论是否击杀，都会调用 `ATurnManager::AddStep()` 消耗 1 步。
+10. 失败攻击视觉回到原格后，Pawn 会调用 `ResolvePickupAtCurrentTile()`，让原格上的拾取物有机会在进入敌方回合前结算。
+11. 近战攻击无论是否击杀，都会调用 `ATurnManager::AddStep()` 消耗 1 步。
 
 非法移动、撞墙、越界、障碍格、目标格不是敌人且非空，都不会触发攻击，也不会消耗步数。
 
@@ -26,9 +27,11 @@
 3. 默认 `AGridEnemyPawn::ExecuteBasicTurn()` 判断敌人与玩家是否相邻。
 4. 若相邻且未被压制，敌人先调用 `ApplyMeleeAttackDamage()` 完成数值结算，再触发 `ExecuteMeleeAttack()` 供蓝图播放表现。
 5. `ApplyMeleeAttackDamage()` 通过玩家 Pawn 上的 `UCombatResolverComponent::ResolveEnemyMeleeAttack()` 修改 `UPlayerAttributeComponent`。
-6. 默认近战造成 `AttackDamage` 点 HP 伤害，并可按敌人阵营额外扣减玩家对应属性值。
-7. 如果玩家未被击败，敌人播放一次短距离前冲再回到原格的攻击表现，格子占据不变化。
-8. 如果玩家 HP 降至 `0`，敌人清空玩家格占据，移动进入玩家所在格，`AGridEnemyManager` 将 `ATurnManager` 状态设为 `Defeat`，并停止后续敌人行动。
+6. `ResolveEnemyMeleeAttack()` 在应用任何敌人伤害前会先调用 `PlayerPawn->ResolvePickupAtCurrentTile()`。因此玩家只剩 1 点 HP 且站在回血道具上同时受击时，会先尝试回血，再结算敌人伤害。
+7. 默认近战造成 `AttackDamage` 点 HP 伤害，并可按敌人阵营额外扣减玩家对应属性值。
+8. 如果本次攻击造成 HP 伤害，伤害应用后会再次调用 `ResolvePickupAtCurrentTile()`。这个二次尝试处理满血玩家站在回血道具上时，伤害前拾取无效果、伤害后应立即吃掉脚下道具的边界情况。
+9. 如果玩家未被击败，敌人播放一次短距离前冲再回到原格的攻击表现，格子占据不变化。
+10. 如果玩家 HP 降至 `0`，敌人清空玩家格占据，移动进入玩家所在格，`AGridEnemyManager` 将 `ATurnManager` 状态设为 `Defeat`，并停止后续敌人行动。
 
 敌人跨阵营友伤的流程如下：
 
@@ -54,6 +57,7 @@
 
 - 玩家攻击敌人时不会先占据目标格，只有击杀成功后才进入敌人格。
 - 未击杀时不会触发目标格的 `Construct` / `Acid` 地块效果，因为玩家最终没有进入该格。
+- 未击杀回退到原格后会结算原格拾取物；这不是目标格进入效果，也不会改变目标格地块属性。
 - 击杀成功后会触发目标格地块效果，因为玩家最终占据该格。
 
 ## 敌人基础类型

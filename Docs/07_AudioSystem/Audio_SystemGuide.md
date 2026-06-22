@@ -60,6 +60,21 @@ void StopBGM(float FadeTime = -1.0f);
 
 当 `FadeTime < 0` 时，系统使用 `UGameAudioSettingsDataAsset::DefaultBGMFadeTime`。BGM 由 `UGameAudioSubsystem` 持有，不挂在关卡 Actor 生命周期上。
 
+## 音量控制
+
+`UGameAudioSubsystem` 当前提供 BGM 与 SFX 两类运行时音量：
+
+```cpp
+void SetBGMVolume(float Volume);
+float GetBGMVolume() const;
+void SetSFXVolume(float Volume);
+float GetSFXVolume() const;
+```
+
+`Volume` 范围为 `0.0` 到 `1.0`。BGM 音量会应用到当前 BGM 组件；SFX 音量会应用到事件音效和可控音效组件。新创建的音效组件也会读取当前 SFX 音量。
+
+Setting 菜单通过 `USettingsMenuWidget` 的 `BGMSlider` 和 `SFXSlider` 调用这组接口。菜单接入细节见 [UI 菜单系统](../08_UIMenus/README.md)。
+
 ## 玩家音效
 
 | 事件 | 触发位置 | 音效槽 |
@@ -191,5 +206,6 @@ Get Game Audio Subsystem
 - `Sounds` 数组为空时不会播放音效。
 - 事件音效会跨关卡切换继续播放，播放完成后由 `UGameAudioSubsystem` 自动清理组件。
 - 世界音效需要提供合理世界坐标。
-- 如果需要音量分类、静音、混音器或设置菜单，后续应接入 `SoundClass`、`SoundMix` 或项目统一设置系统。
+- BGM/SFX 运行时音量已经由 `UGameAudioSubsystem` 和 Setting 菜单接入；如果需要跨启动保存，应继续接入 SaveGame 或项目统一设置系统。
+- 如果需要更细的音量分类、静音或混音器，后续应接入 `SoundClass`、`SoundMix` 或项目统一设置系统。
 - 如果需要权重随机或避免连续重复，建议扩展 `FGameSoundSet`，不要在调用点手写随机逻辑。
