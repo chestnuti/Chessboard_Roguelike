@@ -129,7 +129,8 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 7. 如果攻击线中包含其他敌人，敌人管理器会先收集本窗口内所有跨阵营远程友伤命中，再统一清空占据并调用 `Kill()`。
 8. 如果两个不同阵营远程敌人在同一结算窗口内互相命中，双方都会在统一应用阶段死亡，不受遍历顺序影响。
 9. 如果远程敌人在开火回合被玩家属性压制，会取消待结算攻击线并清除提示。
-10. 如果远程敌人不能瞄准玩家，它会优先选择能在一步后与玩家同 X 或同 Y 且无障碍视线的邻格；没有这样的邻格时，再选择更接近对齐的邻格，最后才回退到 A* 靠近玩家。
+10. 如果远程敌人当前已与玩家同 X 或同 Y，但中间存在 `Obstacle` 导致无法瞄准，它会改用 A* 尝试绕路靠近玩家。
+11. 如果远程敌人不能瞄准玩家，它只会优先选择能在一步后与玩家同 X 或同 Y 且无障碍视线的邻格；没有这样的邻格时，会回退到 A* 靠近玩家。
 
 `URangedAttackTelegraphComponent` 是纯表现组件，不修改 `AGridManager::Tiles`、`ETileType` 或占据状态。默认情况下它会复用 `GridSettings->TileMesh` 来生成 `InstancedStaticMesh` 提示；可在蓝图子类中设置 `TelegraphTileMesh`、`TelegraphMaterial`、`ZOffset` 和 `ScaleMultiplier` 调整表现。
 
@@ -160,7 +161,7 @@ Source/Chessboard_Roguelike/Private/Enemy/RangedAttackTelegraphComponent.cpp
 - 移动不使用 NavMesh，只使用 `AGridManager::RequestMove()`。
 - 成功移动后，敌人 Actor 会从旧格中心插值到新格中心，默认时长为 `MoveDuration = 0.15`。
 - 移动插值期间，敌人管理器延迟调用 `ATurnManager::EndEnemyTurn()`，防止玩家在敌人视觉移动未完成时输入。
-- `BehaviorType == Ranged` 的敌人会优先尝试进入远程瞄准模式；无法瞄准时优先移动到能与玩家同 X/Y 轴并取得无障碍视线的位置，而不是直接靠近玩家。
+- `BehaviorType == Ranged` 的敌人会优先尝试进入远程瞄准模式；无法瞄准时只优先移动到一步后可取得无障碍攻击线的位置。同轴但被障碍阻挡，或没有可攻击对齐位时，会改用 A* 靠近玩家。
 - 远程敌人进入瞄准模式后会显示锁定攻击线，并在下一次敌方回合开始时由敌人管理器优先批量结算所有待结算攻击线。
 
 ## 边界与后续扩展

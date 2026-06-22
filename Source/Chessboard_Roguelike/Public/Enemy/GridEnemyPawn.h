@@ -177,6 +177,7 @@ private:
 
 	bool EnterRangedAimMode(AGridPawn* PlayerPawn);
 	bool TryMoveTowardRangedAlignment(AGridPawn* PlayerPawn);
+	bool TryMoveTowardPlayerByAStar(AGridPawn* PlayerPawn);
 	bool HasLineOfSightToPlayer(const AGridPawn* PlayerPawn, TArray<FIntPoint>& OutLineTiles, FIntPoint& OutDirection) const;
 	bool BuildRangedLineFromCoord(FIntPoint StartCoord, FIntPoint Direction, TArray<FIntPoint>& OutLineTiles) const;
 	static bool TryGetAxisDirection(FIntPoint FromCoord, FIntPoint ToCoord, FIntPoint& OutDirection);

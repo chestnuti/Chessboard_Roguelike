@@ -451,6 +451,18 @@ bool AGridEnemyPawn::TryMoveTowardRangedAlignment(AGridPawn* PlayerPawn)
 	};
 
 	const FIntPoint PlayerCoord = PlayerPawn->CurrentGridCoord;
+	FIntPoint CurrentDirection = FIntPoint::ZeroValue;
+	if (TryGetAxisDirection(CurrentGridCoord, PlayerCoord, CurrentDirection))
+	{
+		TArray<FIntPoint> CurrentLine;
+		const bool bCanAttackFromCurrentCoord = BuildRangedLineFromCoord(CurrentGridCoord, CurrentDirection, CurrentLine)
+			&& CurrentLine.Contains(PlayerCoord);
+		if (!bCanAttackFromCurrentCoord)
+		{
+			return TryMoveTowardPlayerByAStar(PlayerPawn);
+		}
+	}
+
 	FIntPoint BestTarget = CurrentGridCoord;
 	int32 BestScore = MAX_int32;
 
@@ -473,11 +485,14 @@ bool AGridEnemyPawn::TryMoveTowardRangedAlignment(AGridPawn* PlayerPawn)
 			&& BuildRangedLineFromCoord(Candidate, CandidateDirection, CandidateLine)
 			&& CandidateLine.Contains(PlayerCoord);
 
+		if (!bHasLineOfSight)
+		{
+			continue;
+		}
+
 		const FIntPoint Delta = PlayerCoord - Candidate;
 		const int32 ManhattanDistance = FMath::Abs(Delta.X) + FMath::Abs(Delta.Y);
-		const int32 AlignmentDistance = FMath::Min(FMath::Abs(Delta.X), FMath::Abs(Delta.Y));
-		const int32 AxisPriority = bHasLineOfSight ? 0 : (bSameAxis ? 1000 : 2000);
-		const int32 CandidateScore = AxisPriority + AlignmentDistance * 100 + ManhattanDistance;
+		const int32 CandidateScore = ManhattanDistance;
 
 		if (CandidateScore < BestScore)
 		{
@@ -491,8 +506,18 @@ bool AGridEnemyPawn::TryMoveTowardRangedAlignment(AGridPawn* PlayerPawn)
 		return TryMoveToGridCoord(BestTarget);
 	}
 
+	return TryMoveTowardPlayerByAStar(PlayerPawn);
+}
+
+bool AGridEnemyPawn::TryMoveTowardPlayerByAStar(AGridPawn* PlayerPawn)
+{
+	if (!CanAct() || !PlayerPawn || !GridManager)
+	{
+		return false;
+	}
+
 	TArray<FIntPoint> PathToPlayer;
-	if (GridManager->FindPathAStar(CurrentGridCoord, PlayerCoord, PathToPlayer, true) && PathToPlayer.Num() >= 2)
+	if (GridManager->FindPathAStar(CurrentGridCoord, PlayerPawn->CurrentGridCoord, PathToPlayer, true) && PathToPlayer.Num() >= 2)
 	{
 		return TryMoveToGridCoord(PathToPlayer[1]);
 	}

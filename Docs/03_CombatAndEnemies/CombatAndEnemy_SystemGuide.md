@@ -190,6 +190,7 @@
 8. 如果两个不同阵营远程敌人在同一结算窗口内互相命中，双方都会进入统一死亡集合，因此双方同时死亡，不受遍历顺序影响。
 9. 如果远程敌人在开火回合被玩家属性压制，会取消待结算攻击线并清除提示。
 10. 攻击结算后调用 `ClearRangedAimMode()`，清除攻击线缓存和 Telegraph 显示。
+11. 如果远程敌人与玩家同轴但被 `Obstacle` 阻挡，或一步内找不到能获得无障碍攻击线的邻格，它会改用 `AGridManager::FindPathAStar()` 靠近玩家；后续回合一旦能攻击到玩家，会再次优先进入瞄准模式。
 
 `URangedAttackTelegraphComponent` 默认复用 `GridSettings->TileMesh` 生成 `InstancedStaticMesh` 提示。可在敌人蓝图中配置 `TelegraphTileMesh`、`TelegraphMaterial`、`ZOffset` 和 `ScaleMultiplier`。如果未配置提示材质，组件仍会生成实例并使用网格默认材质；如果没有可用 Mesh，则只保留逻辑瞄准，不显示视觉提示。
 
