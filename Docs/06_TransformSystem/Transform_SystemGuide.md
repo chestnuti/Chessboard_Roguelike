@@ -189,6 +189,7 @@ WBP_TransformWheel
 - `Image` 建议设置为 `Hit Test Invisible`，避免挡住按钮点击。
 - 这些控件在 C++ 中使用 `BindWidgetOptional + BlueprintReadOnly` 暴露。修改 C++ 后需要重新编译并重开或刷新 `WBP_TransformWheel`，才能在事件图表的继承变量中看到它们。
 - 点击轮盘槽位调用变身请求后，会在 `TransformWheelOpenSuppressDurationAfterSelectionRequest` 时间内暂时忽略 G 键打开输入，避免 UI 点击和输入焦点变化造成轮盘闪回。
+- 槽位按钮 `OnPressed` 会通知 Controller 开启 `TransformWheelPointerGuardDuration` 保护窗；保护窗内 G 的 Completed 不会关闭轮盘。`OpenTransformWheelAction` 的 Canceled 被视为 UI/焦点打断，不关闭轮盘，真实松开 G 由 Completed 处理。
 
 ### Controller 状态机
 

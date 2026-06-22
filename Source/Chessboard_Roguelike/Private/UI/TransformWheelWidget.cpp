@@ -77,9 +77,19 @@ void UTransformWheelWidget::HandleSlot0Clicked()
 	HandleSlotClicked(0);
 }
 
+void UTransformWheelWidget::HandleSlot0Pressed()
+{
+	HandleSlotPressed();
+}
+
 void UTransformWheelWidget::HandleSlot1Clicked()
 {
 	HandleSlotClicked(1);
+}
+
+void UTransformWheelWidget::HandleSlot1Pressed()
+{
+	HandleSlotPressed();
 }
 
 void UTransformWheelWidget::HandleSlot2Clicked()
@@ -87,9 +97,19 @@ void UTransformWheelWidget::HandleSlot2Clicked()
 	HandleSlotClicked(2);
 }
 
+void UTransformWheelWidget::HandleSlot2Pressed()
+{
+	HandleSlotPressed();
+}
+
 void UTransformWheelWidget::HandleSlot3Clicked()
 {
 	HandleSlotClicked(3);
+}
+
+void UTransformWheelWidget::HandleSlot3Pressed()
+{
+	HandleSlotPressed();
 }
 
 void UTransformWheelWidget::BuildDefaultWheelIfNeeded()
@@ -132,15 +152,19 @@ void UTransformWheelWidget::BuildDefaultWheelIfNeeded()
 		{
 		case 0:
 			Button->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot0Clicked);
+			Button->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot0Pressed);
 			break;
 		case 1:
 			Button->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot1Clicked);
+			Button->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot1Pressed);
 			break;
 		case 2:
 			Button->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot2Clicked);
+			Button->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot2Pressed);
 			break;
 		case 3:
 			Button->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot3Clicked);
+			Button->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot3Pressed);
 			break;
 		default:
 			break;
@@ -196,24 +220,40 @@ void UTransformWheelWidget::BindSlotButtonDelegates()
 			Button->OnClicked.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot1Clicked);
 			Button->OnClicked.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot2Clicked);
 			Button->OnClicked.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot3Clicked);
+			Button->OnPressed.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot0Pressed);
+			Button->OnPressed.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot1Pressed);
+			Button->OnPressed.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot2Pressed);
+			Button->OnPressed.RemoveDynamic(this, &UTransformWheelWidget::HandleSlot3Pressed);
 		}
 	}
 
 	if (SlotButtons.IsValidIndex(0) && SlotButtons[0])
 	{
 		SlotButtons[0]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot0Clicked);
+		SlotButtons[0]->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot0Pressed);
 	}
 	if (SlotButtons.IsValidIndex(1) && SlotButtons[1])
 	{
 		SlotButtons[1]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot1Clicked);
+		SlotButtons[1]->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot1Pressed);
 	}
 	if (SlotButtons.IsValidIndex(2) && SlotButtons[2])
 	{
 		SlotButtons[2]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot2Clicked);
+		SlotButtons[2]->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot2Pressed);
 	}
 	if (SlotButtons.IsValidIndex(3) && SlotButtons[3])
 	{
 		SlotButtons[3]->OnClicked.AddDynamic(this, &UTransformWheelWidget::HandleSlot3Clicked);
+		SlotButtons[3]->OnPressed.AddDynamic(this, &UTransformWheelWidget::HandleSlot3Pressed);
+	}
+}
+
+void UTransformWheelWidget::HandleSlotPressed()
+{
+	if (OwningGridController)
+	{
+		OwningGridController->NotifyTransformWheelPointerInteractionStarted();
 	}
 }
 

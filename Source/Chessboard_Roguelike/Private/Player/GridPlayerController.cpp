@@ -176,8 +176,8 @@ void AGridPlayerController::SetupInputComponent()
 	if (OpenTransformWheelAction)
 	{
 		EnhancedInputComponent->BindAction(OpenTransformWheelAction, ETriggerEvent::Started, this, &AGridPlayerController::HandleTransformWheelStarted);
-		EnhancedInputComponent->BindAction(OpenTransformWheelAction, ETriggerEvent::Completed, this, &AGridPlayerController::HandleTransformWheelReleased);
-		EnhancedInputComponent->BindAction(OpenTransformWheelAction, ETriggerEvent::Canceled, this, &AGridPlayerController::HandleTransformWheelReleased);
+		EnhancedInputComponent->BindAction(OpenTransformWheelAction, ETriggerEvent::Completed, this, &AGridPlayerController::HandleTransformWheelCompleted);
+		EnhancedInputComponent->BindAction(OpenTransformWheelAction, ETriggerEvent::Canceled, this, &AGridPlayerController::HandleTransformWheelCanceled);
 	}
 	if (TransformLeftClickAction)
 	{
@@ -272,8 +272,13 @@ void AGridPlayerController::HandleTransformWheelStarted()
 	OnTransformWheelOpened.Broadcast();
 }
 
-void AGridPlayerController::HandleTransformWheelReleased()
+void AGridPlayerController::HandleTransformWheelCompleted()
 {
+	if (IsTransformWheelPointerGuardActive())
+	{
+		return;
+	}
+
 	if (!bTransformSelectionInProgress && ControlMode == EPlayerControlMode::TransformWheel)
 	{
 		HideTransformWheel();
@@ -281,8 +286,20 @@ void AGridPlayerController::HandleTransformWheelReleased()
 	}
 }
 
+void AGridPlayerController::HandleTransformWheelCanceled()
+{
+	// Enhanced Input can cancel the G action when UMG captures pointer/focus.
+	// Treat actual key release as Completed; Canceled should not close or reopen the wheel session.
+}
+
 void AGridPlayerController::HandleTransformLeftClick()
 {
+	if (ControlMode == EPlayerControlMode::TransformWheel)
+	{
+		BeginTransformWheelPointerGuard();
+		return;
+	}
+
 	if (ControlMode != EPlayerControlMode::TransformTargeting || bIsCameraDragging)
 	{
 		return;
@@ -368,6 +385,39 @@ void AGridPlayerController::HandleTransformRightMouseReleased()
 	{
 		CancelTransformTargeting();
 	}
+}
+
+void AGridPlayerController::NotifyTransformWheelPointerInteractionStarted()
+{
+	if (ControlMode == EPlayerControlMode::TransformWheel)
+	{
+		BeginTransformWheelPointerGuard();
+	}
+}
+
+void AGridPlayerController::BeginTransformWheelPointerGuard()
+{
+	if (TransformWheelPointerGuardDuration <= 0.f)
+	{
+		return;
+	}
+
+	if (const UWorld* World = GetWorld())
+	{
+		TransformWheelPointerGuardUntilTime =
+			World->GetTimeSeconds() + TransformWheelPointerGuardDuration;
+	}
+}
+
+bool AGridPlayerController::IsTransformWheelPointerGuardActive() const
+{
+	if (TransformWheelPointerGuardUntilTime <= 0.f)
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	return World && World->GetTimeSeconds() < TransformWheelPointerGuardUntilTime;
 }
 
 void AGridPlayerController::SuppressTransformWheelOpenAfterSelectionRequest()

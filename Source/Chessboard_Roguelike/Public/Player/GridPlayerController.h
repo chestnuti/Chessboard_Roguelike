@@ -64,6 +64,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Transform")
 	void CancelTransformTargeting();
 
+	UFUNCTION(BlueprintCallable, Category = "Transform")
+	void NotifyTransformWheelPointerInteractionStarted();
+
 	UFUNCTION(BlueprintCallable, Category = "Transform|Camera")
 	void NotifyTransformCameraDragStarted();
 
@@ -144,6 +147,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input|Transform", meta = (ClampMin = "0.0"))
 	float TransformWheelOpenSuppressDurationAfterSelectionRequest = 0.35f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input|Transform", meta = (ClampMin = "0.0"))
+	float TransformWheelPointerGuardDuration = 0.25f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
 	TSubclassOf<UPlayerAttributeHUDWidget> PlayerAttributeHUDClass;
 
@@ -206,11 +212,14 @@ private:
 	void HandleUseEnergyFinished();
 	void HandleSwitchEnergyType();
 	void HandleTransformWheelStarted();
-	void HandleTransformWheelReleased();
+	void HandleTransformWheelCompleted();
+	void HandleTransformWheelCanceled();
 	void HandleTransformLeftClick();
 	void HandleTransformCancel();
 	void HandleTransformRightMouseStarted();
 	void HandleTransformRightMouseReleased();
+	void BeginTransformWheelPointerGuard();
+	bool IsTransformWheelPointerGuardActive() const;
 	void SuppressTransformWheelOpenAfterSelectionRequest();
 	bool IsTransformWheelOpenTemporarilySuppressed() const;
 	UFUNCTION()
@@ -250,6 +259,7 @@ private:
 	bool bEdgeScrollEnabled = false;
 	bool bIsCameraDragging = false;
 	bool bTransformSelectionInProgress = false;
+	float TransformWheelPointerGuardUntilTime = -1.f;
 	float TransformWheelOpenSuppressedUntilTime = -1.f;
 	bool bRestoreCameraAfterTransformMove = false;
 	bool bRightMousePressedForTransform = false;

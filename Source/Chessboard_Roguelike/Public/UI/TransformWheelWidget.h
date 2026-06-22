@@ -111,17 +111,30 @@ private:
 	void HandleSlot0Clicked();
 
 	UFUNCTION()
+	void HandleSlot0Pressed();
+
+	UFUNCTION()
 	void HandleSlot1Clicked();
+
+	UFUNCTION()
+	void HandleSlot1Pressed();
 
 	UFUNCTION()
 	void HandleSlot2Clicked();
 
 	UFUNCTION()
+	void HandleSlot2Pressed();
+
+	UFUNCTION()
 	void HandleSlot3Clicked();
+
+	UFUNCTION()
+	void HandleSlot3Pressed();
 
 	void BuildDefaultWheelIfNeeded();
 	void CacheDesignedSlotWidgets();
 	void BindSlotButtonDelegates();
+	void HandleSlotPressed();
 	void HandleSlotClicked(int32 SlotIndex);
 	void RefreshSlotLabels();
 };
