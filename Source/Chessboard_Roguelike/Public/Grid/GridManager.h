@@ -6,6 +6,7 @@
 #include "GridManager.generated.h"
 
 class UGridSettings;
+class UGridObstacleVisualComponent;
 class UInstancedStaticMeshComponent;
 class USceneComponent;
 
@@ -33,6 +34,15 @@ public:
 	// One component renders all tile instances; TileData remains the source of gameplay truth.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Grid")
 	TObjectPtr<UInstancedStaticMeshComponent> TileISM;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Grid|Obstacle")
+	TObjectPtr<UInstancedStaticMeshComponent> ObstacleCubeISM;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Grid|Obstacle")
+	TObjectPtr<UInstancedStaticMeshComponent> ObstacleFaceISM;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Grid|Obstacle")
+	TObjectPtr<UGridObstacleVisualComponent> ObstacleVisualComponent;
 
 	// Central grid state store keyed by logical coordinate.
 	UPROPERTY(BlueprintReadOnly, Category = "Grid")
@@ -72,6 +82,10 @@ public:
 	// Changes terrain type only; occupancy, coordinates, and walkability are preserved.
 	UFUNCTION(BlueprintCallable, Category = "Grid")
 	bool SetTileType(const FIntPoint& Coord, ETileType NewTileType);
+
+	// Changes terrain and synchronizes blocking state for obstacle creation/removal.
+	UFUNCTION(BlueprintCallable, Category = "Grid")
+	bool SetTileBlockingType(const FIntPoint& Coord, ETileType NewTileType);
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Grid|Visual")
 	void RefreshTileInstanceVisual(const FIntPoint& Coord, ETileType NewTileType);

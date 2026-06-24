@@ -7,6 +7,7 @@
 | 文档 | 说明 |
 | --- | --- |
 | [GridPrototype_UserManual.md](GridPrototype_UserManual.md) | 棋盘移动原型使用手册，覆盖 GridSettings、Tile 数据、GridManager 接口、Pawn 移动接口、PlayerController 输入、TurnManager 回合锁和基础调试建议。 |
+| [ObstacleVisual_SystemGuide.md](ObstacleVisual_SystemGuide.md) | Obstacle 视觉系统技术说明，覆盖立方体/墙面 ISM 结构、邻近可移动地块过滤、墙面生成规则、PerInstanceCustomData 写入和材质接入约定。 |
 
 ## 相关模块
 

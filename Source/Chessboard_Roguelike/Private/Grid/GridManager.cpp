@@ -3,6 +3,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Grid/GridObstacleVisualComponent.h"
 #include "Grid/GridSettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogGridManager, Log, All);
@@ -78,6 +79,15 @@ AGridManager::AGridManager()
 	TileISM->SetupAttachment(SceneRoot);
 	TileISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	TileISM->NumCustomDataFloats = TileCustomDataFloatCount;
+
+	ObstacleCubeISM = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("ObstacleCubeISM"));
+	ObstacleCubeISM->SetupAttachment(SceneRoot);
+
+	ObstacleFaceISM = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("ObstacleFaceISM"));
+	ObstacleFaceISM->SetupAttachment(SceneRoot);
+	ObstacleFaceISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	ObstacleVisualComponent = CreateDefaultSubobject<UGridObstacleVisualComponent>(TEXT("ObstacleVisualComponent"));
 }
 
 void AGridManager::OnConstruction(const FTransform& Transform)
@@ -114,6 +124,10 @@ void AGridManager::GenerateGrid()
 	ApplyInitialTileOverrides(TileLayout);
 	ApplyTileLayoutInternal(TileLayout);
 	RebuildTileVisuals();
+	if (ObstacleVisualComponent)
+	{
+		ObstacleVisualComponent->RebuildFromGrid(this);
+	}
 
 	UE_LOG(LogGridManager, Log, TEXT("Generated grid: %d x %d (%d tiles)."),
 		CurrentWidth, CurrentHeight, Tiles.Num());
@@ -146,6 +160,10 @@ bool AGridManager::ApplyTileLayout(const TArray<FGridTileLayoutData>& TileLayout
 	CurrentHeight = LayoutHeight;
 	ApplyTileLayoutInternal(TileLayout);
 	RebuildTileVisuals();
+	if (ObstacleVisualComponent)
+	{
+		ObstacleVisualComponent->RebuildFromGrid(this);
+	}
 
 	UE_LOG(LogGridManager, Log, TEXT("Applied tile layout: %d x %d (%d tiles)."),
 		CurrentWidth, CurrentHeight, Tiles.Num());
@@ -186,6 +204,16 @@ void AGridManager::ClearGridState()
 		{
 			TileISM->SetStaticMesh(GridSettings->TileMesh);
 		}
+	}
+
+	if (ObstacleCubeISM)
+	{
+		ObstacleCubeISM->ClearInstances();
+	}
+
+	if (ObstacleFaceISM)
+	{
+		ObstacleFaceISM->ClearInstances();
 	}
 }
 
@@ -389,6 +417,51 @@ bool AGridManager::SetTileType(const FIntPoint& Coord, ETileType NewTileType)
 	ApplyTileInstanceCustomData(Coord, NewTileType);
 	RefreshTileInstanceVisual(Coord, NewTileType);
 	OnTileTypeChanged.Broadcast(Coord, NewTileType);
+	if (ObstacleVisualComponent)
+	{
+		ObstacleVisualComponent->RefreshObstacleAtCoord(this, Coord);
+	}
+	return true;
+}
+
+bool AGridManager::SetTileBlockingType(const FIntPoint& Coord, ETileType NewTileType)
+{
+	FTileData* TileData = Tiles.Find(Coord);
+	if (!TileData)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("SetTileBlockingType failed: invalid coord (%d,%d)."), Coord.X, Coord.Y);
+		return false;
+	}
+
+	const bool bWillBlock = NewTileType == ETileType::Obstacle || TileData->CellRole == EGridCellRole::Wall;
+	if (bWillBlock && TileData->OccupantType != EGridOccupantType::Empty && TileData->OccupantType != EGridOccupantType::Obstacle)
+	{
+		UE_LOG(LogGridManager, Warning, TEXT("SetTileBlockingType failed: coord (%d,%d) is occupied by a unit."), Coord.X, Coord.Y);
+		return false;
+	}
+
+	TileData->TileType = NewTileType;
+	TileData->bWalkable = !bWillBlock;
+	TileData->bConvertible = !bWillBlock;
+
+	if (bWillBlock)
+	{
+		TileData->OccupantType = EGridOccupantType::Obstacle;
+		TileData->OccupantActor.Reset();
+	}
+	else if (TileData->OccupantType == EGridOccupantType::Obstacle)
+	{
+		TileData->OccupantType = EGridOccupantType::Empty;
+		TileData->OccupantActor.Reset();
+	}
+
+	ApplyTileInstanceCustomData(Coord, NewTileType);
+	RefreshTileInstanceVisual(Coord, NewTileType);
+	OnTileTypeChanged.Broadcast(Coord, NewTileType);
+	if (ObstacleVisualComponent)
+	{
+		ObstacleVisualComponent->RefreshObstacleAtCoord(this, Coord);
+	}
 	return true;
 }
 
