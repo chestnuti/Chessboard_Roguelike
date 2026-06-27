@@ -20,10 +20,10 @@ These README links are already wired. Add the screenshots or GIFs to the paths s
 | Moment | Preview |
 | --- | --- |
 | Core loop: move, read threats, resolve turns | ![Core gameplay loop GIF](Docs/Media/Homepage/gameplay-loop.gif) |
-| Terrain as resource: Construct, Corrode, minimal, and blocked tiles | ![Tile resources screenshot](Docs/Media/Homepage/tile-resources.png) |
-| Combat preview: threshold kills, enemy threat, and ranged lines | ![Combat preview screenshot](Docs/Media/Homepage/combat-preview.png) |
+| Terrain as resource: Construct, Corrode, minimal, and blocked tiles | ![Tile resources screenshot](Docs/Media/Homepage/tile-resources.gif) |
+| Combat preview: threshold kills, enemy threat, and ranged lines | ![Combat preview screenshot](Docs/Media/Homepage/combat-preview.gif) |
 | Chess-piece transformation: Knight, Bishop, Rook, and Queen movement | ![Chess transformation GIF](Docs/Media/Homepage/chess-transform.gif) |
-| Procedural run: generated rooms, corridors, enemies, and rewards | ![Procedural run screenshot](Docs/Media/Homepage/pcg-run.png) |
+| Procedural run: generated rooms, corridors, enemies, and rewards | ![Procedural run screenshot](Docs/Media/Homepage/pcg-run.gif) |
 
 ## Controls
 
