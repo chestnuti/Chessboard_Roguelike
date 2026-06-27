@@ -1,548 +1,629 @@
-# 游戏设计文档（GDD）—— 构成 / 酸性 棋盘式肉鸽战术游戏（暂定名）
+<a id="english-version"></a>
+<p align="right"><a href="#中文版本"><strong>中文</strong></a></p>
 
-版本：0.4  
-作者：  
-日期：2026-06-22  
-状态：当前项目版，已对齐 `Docs` 技术说明与 `Source/Chessboard_Roguelike` 实际代码结构。
+# Construct & Corrode - Gameplay Design Document
 
----
-
-## 参考依据
-
-- [技术需求与实现文档](GameDesignDoc_技术需求与实现文档.md)
-- [核心棋盘与回合](../01_CoreGrid/README.md)
-- [地块属性与转换能量](../02_TileAttributesAndEnergy/README.md)
-- [战斗与敌人](../03_CombatAndEnemies/README.md)
-- [教学关卡](../05_TutorialLevels/README.md)
-- [变身棋子系统](../06_TransformSystem/README.md)
-- [音频系统](../07_AudioSystem/README.md)
-- [UI 菜单系统](../08_UIMenus/README.md)
-- `Source/Chessboard_Roguelike` 中的当前 C++ 类型与模块目录。
+Version: 0.5  
+Date: 2026-06-26  
+Document focus: Gameplay vision, player experience, and run flow.
 
 ---
 
-## 摘要
+## High Concept
 
-- 类型：步进式回合制、Roguelite、网格战术、轻解谜策略。
-- 核心体验：玩家在棋盘地牢中通过移动、属性积累、阈值击杀、敌人友伤、一次性变身移动和 3x3 地块转换，完成每一步都有明确取舍的空间战术决策。
-- 当前项目形态：已经从初版单房间概念扩展为“正式 PCG Run + 固定教学关卡 + HUD/菜单/音频/存档记录”的垂直切片基础。
-- 当前胜利目标：清除当前关卡内所有敌人。
-- 当前失败目标：玩家 HP 降至 0。
+Construct & Corrode is a step-based roguelite tactics game played on a chessboard dungeon. The player reads the board, moves one tile at a time, gathers opposing Construct and Corrode power from terrain, prepares single-action threshold kills, manipulates enemy friendly fire, and spends rare chess-piece transformations to break the normal movement rules at decisive moments.
 
----
+The game is designed around one question: **what is the most valuable next step?** Every move changes position, resource state, enemy timing, and future kill potential.
 
-## 设计目标与支柱
+## Genre And Experience
 
-1. **短时决策的紧张感**：默认 WASD 四向单格移动，每次有效移动或攻击都推进回合。玩家需要在有限行动中权衡资源、站位和敌人行动。
-2. **地形即资源**：构成、酸性、极简与障碍地块不只是背景，而是属性成长、路径规划、击杀准备和地图重塑的主要载体。
-3. **双属性非对称**：构成值与酸性值同时决定玩家输出、压制能力和风险暴露。玩家需要在两类属性之间选择成长节奏。
-4. **单次阈值击杀**：敌人不走累计扣血，而是要求玩家一次行动中达到击杀阈值，强化“准备、判断、爆发”的战术节奏。
-5. **敌我空间博弈**：敌人行动、远程攻击线、跨阵营友伤与同格冲突让地图成为可操控的清除链系统。
-6. **一次性战术突破**：变身棋子是稀缺的特殊移动资源，用于突破默认移动限制、远距切入或创造关键击杀。
-7. **可学习、可复现、可扩展**：教学关卡固定展示规则，正式关卡使用可种子复现的程序生成与可配置难度成长。
+- **Genre**: step-based turn tactics, roguelite, grid strategy, light puzzle tactics.
+- **Session shape**: short tactical floors chained into a run.
+- **Core objective**: clear every enemy on the current floor.
+- **Failure condition**: player HP reaches 0.
+- **Primary feeling**: deliberate pressure, readable danger, and the satisfaction of turning a hostile board into a planned clearing chain.
 
----
+## Player Fantasy
 
-## 当前项目模式
+The player is not a brute-force fighter. They are a board tactician caught between two opposed forces:
 
-### 正式 PCG Run
+- **Construct**: structure, geometry, order, hard edges, controlled growth.
+- **Corrode**: acid, erosion, saturation, unstable bursts, destructive flow.
 
-- 使用 L-System 地牢生成管线创建关卡布局。
-- 每一关拥有房间、走廊、墙体、起点、出口、敌人候选点和奖励候选点。
-- 关卡编号驱动难度成长：目标房间数、敌人数、拾取物数和敌人击杀阈值可随深度增加。
-- 默认胜利条件为本关所有敌人死亡；胜利后可自动推进到下一关。
-- Run 计时跨关卡持续，玩家死亡后停止。
-- 保存最远到达关卡，以及到达该关卡的最快用时。
+The player survives by absorbing both forces, deciding when to lean into one, when to pivot, and when to let enemies destroy each other.
 
-### 固定教学关卡
+## Design Pillars
 
-- 教学关卡不走 PCG，使用固定 `10 x 10` 棋盘。
-- 当前共有 6 个教学关卡：
-  1. 地块属性变化。
-  2. 敌人击杀。
-  3. 地块转换能量。
-  4. 远程敌人与跨阵营友伤。
-  5. 阵营压制。
-  6. 生命恢复物与变身棋子。
-- 教学内容通过 DataAsset 固定地块、敌人、拾取物、玩家起点和分步 UI 流程。
-- 教学 UI 只显示引导，不接管输入；玩家仍使用正式玩法输入完成目标。
+1. **Every step is a decision**  
+   Default movement is four-directional and tile-by-tile. Since valid actions advance the turn, even a small repositioning choice carries tactical cost.
 
-### 菜单流程
+2. **Terrain is the resource economy**  
+   Tiles are not passive floor art. Construct, Corrode, minimal, and blocked tiles define movement routes, attribute growth, combat readiness, and local board control.
 
-- 主菜单提供开始游戏、教学、设置和历史记录展示入口。
-- 设置菜单提供 BGM 与 SFX 音量滑条。
-- Pause 菜单提供 Resume、Back、Setting、Main Menu、Quit Game 请求入口。
-- 当前 Resume 仍处于事件入口阶段，完整暂停/恢复输入闭环是后续补齐项。
+3. **Kills are prepared, not chipped down**  
+   Enemies do not use gradual HP attrition. The player must meet the correct kill threshold in one action, creating a rhythm of preparation, prediction, and release.
 
----
+4. **Enemy factions are part of the puzzle**  
+   Opposing enemy factions can damage or eliminate each other through ranged lines and collision rules. A dangerous enemy can become a tool if the player reshapes the situation.
 
-## 核心循环
+5. **Special movement is a tactical spike**  
+   Chess-piece transformations are rare one-use movement options. They create breakthrough turns without replacing the tension of ordinary grid movement.
 
-### 单步循环（5-15 秒）
+6. **Rules must be readable at a glance**  
+   The player should be able to understand what will happen next through tile colors, enemy faction language, attack previews, movement highlights, and clear feedback.
 
-1. 玩家观察棋盘地块、敌人类型、敌人攻击线、可移动格和自身属性。
-2. 玩家选择默认移动、近战攻击、使用地块转换能量，或消耗变身棋子进行特殊移动。
-3. 系统结算玩家行动、地块属性、拾取物、攻击结果和反馈。
-4. 敌人按规则行动或攻击，远程敌人可能进入瞄准或释放攻击线。
-5. 系统检查胜负、刷新 HUD、更新可移动格和战斗预览。
+## Core Gameplay Loop
 
-### 关卡循环（1-5 分钟）
+### Moment-To-Moment Loop
 
-1. 进入一张固定教学图或生成一层 PCG 地牢。
-2. 通过地块积累构成/酸性属性，制造单次击杀条件。
-3. 利用敌人压制、友伤、变身棋子和地块转换清理敌人。
-4. 清除所有敌人后完成当前关卡。
-5. 正式 Run 推进到下一关，继续提升房间数、敌人数、拾取物数和阈值压力。
+1. Read the board: terrain types, enemy faction, enemy behavior, attack lines, safe tiles, and current attributes.
+2. Choose an action: move, attack, use conversion energy, or spend a chess-piece transformation.
+3. Resolve the player action: collect terrain power, trigger pickups, attempt a threshold kill, or reposition.
+4. Resolve enemy intent: melee enemies close in or strike; ranged enemies aim or fire.
+5. Update the board: threats, available moves, attributes, remaining enemies, and run state become readable again.
 
-### 长线循环（5-30 分钟）
+### Floor Loop
 
-- 玩家不断推进关卡层数，追求更远关卡和更快到达历史最远关卡的时间。
-- 当前长线记录为最远层数与最快到达时间；更复杂的永久成长、解锁和构筑系统暂未纳入当前实现。
+1. Enter a tactical floor.
+2. Build Construct or Corrode values through terrain movement.
+3. Prepare kill thresholds against enemies of the opposing faction.
+4. Use friendly fire, suppression, conversion, and transformations to remove enemy clusters.
+5. Clear all enemies to advance deeper into the run.
 
----
+### Run Loop
 
-## 背景与世界观
+1. Start with low resources and a readable board.
+2. Clear floors while enemy density and threshold pressure increase.
+3. Find pickups that restore HP or grant chess-piece transformations.
+4. Push for a deeper floor and a faster run record.
+5. On defeat, the run ends and the player can try again with better tactical understanding.
 
-世界由两股视觉与秩序哲学构成：
+## Board Reading
 
-- **构成主义**：几何、秩序、硬边、结构化控制。
-- **酸性设计**：流体、高饱和、侵蚀、不可预测的爆发。
+The board is the game's main language. A good turn begins with reading five layers:
 
-玩家置身于两种力量交错的棋盘地牢。每一层都是一次小型冲突演练：玩家既吸收两类地块的力量，也利用两类敌人的互相克制来重塑战场。
-
-当前版本以视觉叙事和规则表达为主，不展开完整剧情文本。
-
----
-
-## 地图与地块系统
-
-### 地块类型
-
-| 地块 | 玩法含义 | 当前规则 |
-| --- | --- | --- |
-| 构成地块 | 构成资源来源 | 玩家进入后构成值增加，酸性值减少，并转为极简地块 |
-| 酸性地块 | 酸性资源来源 | 玩家进入后酸性值增加，构成值减少，并转为极简地块 |
-| 极简地块 | 中性缓冲区 | 玩家进入后不改变属性 |
-| 障碍/墙体 | 路径阻挡 | 不可通行，不可被转换 |
-
-地块逻辑数据包含坐标、地块类型、房间/走廊/墙体语义、占据状态、是否可通行、是否可转换、区域 ID 和深度。
-
-### L-System 地牢
-
-正式关卡当前使用 L-System 地牢生成：
-
-- 生成房间节点与连接边。
-- 将房间和走廊栅格化为棋盘布局。
-- 为可通行格分配构成、酸性和极简地块。
-- 通过 Flood Fill 校验所有房间中心从起点可达。
-- 生成敌人与奖励候选点，并避开起点安全区、墙体、出口和不可通行格。
-- 支持固定种子复现，也支持每关随机种子。
-
-当前实现不依赖 UE PCG 插件。UE PCG Graph 更适合未来用于墙体 Mesh、装饰物和场景资产散布。
-
-### 教学固定地图
-
-教学关卡固定为 `10 x 10`，由 `DA_TutorialLevelSet` 配置完整地块、起点、出口、敌人和拾取物。固定地图用于控制学习节奏，避免 PCG 随机性干扰玩家理解核心规则。
-
----
-
-## 回合与行动规则
-
-### 回合状态
-
-当前回合状态以 `ETurnState` 表达，核心状态包括初始化、玩家输入、玩家行动结算、敌人行动、地图结算、胜利和失败。
-
-### 玩家默认行动
-
-- 默认输入：WASD 四向单格移动。
-- 移动到空格：执行移动，结算地块和拾取物。
-- 移动到敌人格：触发近战攻击判定。
-- 尝试撞墙或越界：行动失败，不消耗步数。
-- 主动攻击敌人但未击杀：玩家退回原格，仍消耗步数。
-
-### 敌人行动
-
-- 玩家有效行动后，敌人管理器执行敌方回合。
-- 近战敌人相邻时优先攻击，否则寻路接近玩家。
-- 远程敌人优先寻找与玩家同 X/Y 轴且无遮挡的攻击线，进入瞄准状态后在下一次敌方结算窗口释放。
-- 玩家 HP 归零时，中断后续敌人行动并进入失败状态。
-
----
-
-## 玩家属性
-
-| 属性 | 默认设计 | 当前用途 |
-| --- | ---: | --- |
-| HP | 3 | 承受敌人伤害，降至 0 失败 |
-| 构成值 | 0-10 | 构成输出、构成阵营压制条件 |
-| 酸性值 | 0-10 | 酸性输出、酸性阵营压制条件 |
-
-### 属性变化
-
-- 进入构成地块：构成值 +1，酸性值 -1。
-- 进入酸性地块：酸性值 +1，构成值 -1。
-- 受到构成敌人攻击：通常扣 HP，并扣构成值。
-- 受到酸性敌人攻击：通常扣 HP，并扣酸性值。
-- 属性值夹取在 0 到 10。
-
-### 压制机制
-
-当玩家某一属性达到满值时，对应阵营敌人进入压制状态：
-
-- 构成值满：构成敌人不主动攻击玩家。
-- 酸性值满：酸性敌人不主动攻击玩家。
-- 压制不取消该敌人的免疫规则。
-
-设计意图：让玩家可以通过专注积累某一属性，在短时间内改变敌人威胁结构。
-
----
-
-## 战斗与伤害
-
-### 玩家攻击
-
-玩家一次攻击同时包含两类伤害：
-
-- 构成伤害 = 当前构成值。
-- 酸性伤害 = 当前酸性值。
-
-### 敌人免疫
-
-| 敌人阵营 | 免疫 | 可被主要击杀来源 |
-| --- | --- | --- |
-| 构成敌人 | 构成伤害 | 酸性伤害达到阈值 |
-| 酸性敌人 | 酸性伤害 | 构成伤害达到阈值 |
-
-### 单次阈值击杀
-
-- 敌人拥有 `KillThreshold`。
-- 本次攻击中，非免疫伤害达到或超过阈值时，敌人死亡。
-- 未达到阈值时，敌人不扣血、不累计伤害。
-
-### 友伤与敌人冲突
-
-跨阵营敌人可以互相击杀：
-
-- 远程敌人命中异阵营敌人时，目标直接死亡。
-- 同一远程结算窗口中，异阵营远程敌人互相命中时同步死亡。
-- 异阵营近战敌人发生同格冲突时，根据目标格地块判定结果：
-  - 构成地块：构成敌人击杀酸性敌人。
-  - 酸性地块：酸性敌人击杀构成敌人。
-  - 极简地块：击杀阈值较低者死亡；若相同则双方死亡。
-
-设计意图：让玩家通过站位、诱导和地形重塑创造非对称清除链。
-
----
-
-## 地块转换能量
-
-### 获取
-
-- 玩家击杀敌人后获得 1 个地块转换能量。
-- 当前能量槽上限为 1。
-
-### 使用
-
-- 玩家选择目标转换类型后，消耗能量。
-- 以玩家当前格为中心，将 3x3 范围内可转换地块变为指定类型。
-- 障碍、墙体和特殊不可转换格不会被覆盖。
-
-### 设计定位
-
-地块转换能量是一次性地图重塑权，用于：
-
-- 补足当前缺失属性资源。
-- 改变敌人近战冲突结果。
-- 创造压制或击杀准备条件。
-- 在低资源时恢复策略空间。
-
----
-
-## 可拾取道具
-
-当前拾取物不占据格子，不阻挡玩家移动。玩家进入拾取物所在格后触发效果并销毁拾取物。
-
-| 道具类型 | 效果 | 当前用途 |
-| --- | --- | --- |
-| 生命恢复物 | 回复 HP | 教学 6 与正式奖励池可使用 |
-| 变身棋子 | 增加对应棋子库存 | 提供一次性特殊移动资源 |
-
-正式 PCG Run 可从奖励候选点按深度和权重生成拾取物。教学关卡使用固定坐标与固定蓝图配置。
-
----
-
-## 变身棋子系统
-
-### 设计定位
-
-变身棋子提供一次性战术移动。它不替代默认移动，而是在关键时刻打破四向单格限制，用于远距切入、跨越、斜线突破或精准击杀。
-
-### 获取与背包
-
-- 变身棋子由拾取物提供。
-- 背包按棋子类型堆叠。
-- 当前轮盘最多展示 4 种形态：Knight、Bishop、Rook、Queen。
-
-### 使用流程
-
-1. 玩家按住 G 打开变身轮盘。
-2. 点击有库存的棋子槽位。
-3. 进入鼠标选格模式，玩家外观临时切换为该棋子。
-4. 合法目标格高亮，鼠标悬停格可显示额外材质反馈。
-5. 左键点击合法目标后执行移动或击杀。
-6. 行动成功开始后消耗 1 个对应棋子。
-7. 移动完成后恢复默认外观并推进回合。
-8. ESC 或右键短按取消，不消耗棋子，并恢复默认外观。
-
-### 形态规则
-
-| 形态 | 行动规则 | 阻挡/击杀规则 |
-| --- | --- | --- |
-| Knight | 国际象棋马的 8 个 L 形偏移 | 可跳过中间格；目标为空则移动，目标为可击杀敌人则捕获 |
-| Bishop | 4 个斜向任意距离 | 不可穿越障碍或敌人；遇到首个可击杀敌人可捕获并停止 |
-| Rook | 上下左右 4 向任意距离 | 不可穿越障碍或敌人；遇到首个可击杀敌人可捕获并停止 |
-| Queen | 8 向任意距离 | 结合 Bishop 与 Rook 的方向和阻挡规则 |
-
-### 视野与预览
-
-- 远距离目标选择时启用边缘滚屏。
-- 右键拖动相机时暂停边缘滚屏和左键确认，避免误操作。
-- 变身目标选择接入 Combat Preview，可提示当前形态是否能击杀，以及移动后是否进入敌人威胁范围。
-
----
-
-## 敌人系统
-
-### 敌人类型
-
-| 维度 | 当前类型 |
+| Layer | Player question |
 | --- | --- |
-| 阵营 | 构成、酸性 |
-| 行为 | 近战、远程 |
+| Terrain | Which tiles grow Construct or Corrode, and which routes will become neutral after use? |
+| Enemy faction | Which damage type can kill this enemy, and which damage type is ignored? |
+| Enemy behavior | Is this enemy melee pressure, ranged pressure, or a friendly-fire opportunity? |
+| Timing | Will this move trigger a safe enemy turn, an attack, or a setup for the next turn? |
+| Breakthrough options | Is this the moment to spend conversion energy or a chess-piece transformation? |
+
+The intended player rhythm is: **observe, predict, commit, resolve, re-read**.
+
+## Terrain And Attribute Economy
+
+The player has two opposed attributes:
+
+| Attribute | Role |
+| --- | --- |
+| Construct | Damage source against Corrode enemies and suppression route against Construct enemies. |
+| Corrode | Damage source against Construct enemies and suppression route against Corrode enemies. |
+
+Terrain drives these values:
+
+| Tile type | Gameplay meaning |
+| --- | --- |
+| Construct tile | Increases Construct and lowers Corrode, then becomes minimal. |
+| Corrode tile | Increases Corrode and lowers Construct, then becomes minimal. |
+| Minimal tile | Neutral space that supports movement without changing attributes. |
+| Blocked tile | Shapes routes, sight lines, and enemy approach patterns. |
+
+This creates a soft route-planning puzzle. The player is not simply moving toward an enemy; they are choosing a path that builds the correct future damage.
+
+## Combat Grammar
+
+### Dual Damage
+
+Each player attack carries both current attribute values:
+
+- Construct damage equals the current Construct value.
+- Corrode damage equals the current Corrode value.
+
+### Faction Immunity
+
+| Target | Ignores | Can be killed by |
+| --- | --- | --- |
+| Construct enemy | Construct damage | Corrode damage reaching the kill threshold. |
+| Corrode enemy | Corrode damage | Construct damage reaching the kill threshold. |
+
+### Threshold Kill Rule
+
+Enemies are defeated only when the correct non-immune damage reaches or exceeds their kill threshold in a single action. If the threshold is not met, the attack does not partially weaken the target.
+
+The purpose is to make attacks feel like tactical executions rather than repeated damage trades. The player should ask: **am I ready to strike, or should I spend one more turn shaping the board?**
+
+## Suppression
+
+When one of the player's attributes reaches its maximum, enemies of the matching faction become suppressed and stop actively attacking.
+
+| Full attribute | Suppressed faction |
+| --- | --- |
+| Full Construct | Construct enemies |
+| Full Corrode | Corrode enemies |
+
+Suppression is a tempo tool. It lets the player change the threat structure for a short tactical window, but it does not remove faction immunity. A suppressed enemy may be safer, but it still requires the correct opposing damage type to kill.
+
+## Enemy Design
+
+Enemies are defined by two readable axes:
+
+| Axis | Options |
+| --- | --- |
+| Faction | Construct or Corrode |
+| Behavior | Melee or ranged |
+
+### Melee Enemies
+
+Melee enemies pressure space. They move toward the player and attack when adjacent. Their role is to make local positioning meaningful and to punish careless routes.
+
+### Ranged Enemies
+
+Ranged enemies pressure lines. They threaten straight lanes, aim before firing, and create turns where the player must decide whether to dodge, bait, or redirect the shot.
+
+### Friendly Fire And Collision
+
+Opposing factions can destroy each other:
+
+- A ranged shot that hits an enemy of the opposing faction kills that enemy.
+- Opposing ranged enemies can eliminate each other if their attacks line up in the same resolution window.
+- Opposing melee enemies that collide can resolve based on the terrain they meet on: Construct terrain favors Construct, Corrode terrain favors Corrode, and minimal terrain favors the lower-threshold enemy or destroys both if tied.
+
+This makes enemy placement a resource. The player is rewarded for seeing enemies not only as threats, but as pieces in a clearing chain.
+
+## Conversion Energy
+
+Conversion energy is a limited board rewrite tool gained through kills.
+
+| Rule | Design purpose |
+| --- | --- |
+| Earned by killing enemies | Rewards successful setup with a new tactical option. |
+| Limited storage | Encourages use instead of hoarding. |
+| Converts a 3x3 area around the player | Creates a local, readable burst of terrain control. |
+
+The player uses conversion energy to:
+
+- create missing attribute resources,
+- set up a future threshold kill,
+- alter melee collision outcomes,
+- create suppression routes,
+- recover tactical space when the board is running dry.
+
+## Chess-Piece Transformations
+
+Chess-piece transformations are consumable movement forms. They are designed as rare tactical breakthroughs, not as the default way to move.
+
+| Form | Movement fantasy | Tactical use |
+| --- | --- | --- |
+| Knight | Leap in an L shape | Jump over pressure, reach a precise target, or escape boxed routes. |
+| Bishop | Slide diagonally | Cut through diagonal lanes and attack from unexpected angles. |
+| Rook | Slide orthogonally | Cross long straight paths and punish open lanes. |
+| Queen | Slide in any of eight directions | Spend a powerful option for maximum reach and flexibility. |
+
+The transformation flow should feel like a moment of commitment:
+
+1. The player opens the transformation selection.
+2. The chosen form previews legal targets.
+3. The player confirms a move or capture.
+4. The form is spent and normal movement resumes.
+
+## Pickups
+
+Pickups are simple, readable rewards that support the run without diluting the tactical board focus.
+
+| Pickup | Role |
+| --- | --- |
+| HP recovery | Extends the run after costly decisions or enemy pressure. |
+| Chess-piece form | Adds one tactical breakthrough option to the player's inventory. |
+
+Pickups should appear as meaningful route incentives. A pickup is strongest when reaching it creates an interesting positioning question.
+
+## Difficulty And Progression
+
+The run grows through board pressure rather than through hidden complexity.
+
+| Progression lever | Gameplay effect |
+| --- | --- |
+| More rooms and routes | Increases planning space and navigation pressure. |
+| More enemies | Creates denser threat reading and more friendly-fire opportunities. |
+| More pickups | Offers recovery and transformation choices as pressure rises. |
+| Higher kill thresholds | Demands more deliberate terrain routing and attribute preparation. |
+
+The intended difficulty curve asks players to improve at reading patterns, sequencing actions, and preserving breakthrough tools.
+
+## Tutorial Flow
+
+Tutorial levels are fixed tactical lessons. They introduce one concept at a time, then ask the player to perform it through normal play.
+
+| Tutorial | Learning goal |
+| --- | --- |
+| 1 | Terrain changes and minimal tiles. |
+| 2 | Threshold kills and faction immunity. |
+| 3 | Kill reward into 3x3 terrain conversion. |
+| 4 | Ranged aim lines and cross-faction friendly fire. |
+| 5 | Full-attribute suppression. |
+| 6 | HP recovery, transformation pickup, selection, and special movement. |
+
+The onboarding goal is not to explain every rule in text. It is to make the player *perform* the rule in a controlled space, then recognize it during a run.
+
+## Feedback And Readability
+
+The game should constantly answer: **what can I do, what will happen, and why did that happen?**
+
+| Feedback need | Presentation goal |
+| --- | --- |
+| Available movement | Highlight legal reachable tiles during player input. |
+| Attack result | Preview whether the current attack can kill the target. |
+| Enemy threat | Show melee danger and ranged aim lines clearly. |
+| Attribute state | Keep HP, Construct, Corrode, conversion energy, and transformation inventory visible. |
+| Turn rhythm | Make player action, enemy action, and board update feel distinct. |
+| Transformation targeting | Preview legal destinations and danger after the move. |
+
+Good feedback should reduce rule confusion while preserving decision pressure.
+
+## Audio Direction
+
+Audio supports the tactical rhythm of the board.
+
+- Movement should feel precise and step-based.
+- Attribute gain should make terrain feel valuable.
+- Threshold kills should feel decisive.
+- Failed attacks should clearly communicate that the player was not ready.
+- Conversion and transformation should sound like rare, intentional tools.
+- Enemy aim and ranged fire should create readable anticipation.
+
+The goal is not constant noise. The goal is to sonify tactical beats: **prepare, confirm, strike, convert, survive**.
+
+## Visual Direction
+
+### Construct
+
+Construct visuals should emphasize geometry, hard edges, modular shapes, structured lines, and controlled space.
+
+### Corrode
+
+Corrode visuals should emphasize saturation, fluid motion, erosion, noise, asymmetry, and unstable edges.
+
+### Chess Identity
+
+Player and transformation forms should remain readable from a top-down tactical view. Silhouette clarity matters more than fine detail.
+
+## Current Gameplay Scope
+
+The current gameplay design baseline includes:
+
+- step-based four-direction movement,
+- Construct, Corrode, minimal, and blocked terrain,
+- dual attributes and suppression,
+- threshold kills and faction immunity,
+- melee enemies and ranged enemies,
+- friendly fire and opposing-faction collision,
+- 3x3 terrain conversion energy,
+- HP recovery and chess-piece pickups,
+- Knight, Bishop, Rook, and Queen transformations,
+- procedural run floors,
+- six fixed tutorial levels,
+- combat preview, HUD feedback, menu flow, audio feedback, and run records.
+
+Future design space includes fuller narrative framing, permanent progression, build-defining relics, shops, elite enemies, bosses, and more varied floor objectives.
+
+## Design Summary
+
+Construct & Corrode is about turning movement into preparation. The player wins by reading terrain, building the correct attribute, predicting enemy behavior, and choosing the one step that transforms the board from danger into opportunity.
+
+---
+
+<a id="中文版本"></a>
+<p align="right"><a href="#english-version"><strong>English</strong></a></p>
+
+# Construct & Corrode / 构蚀棋域 - 游戏玩法设计文档
+
+版本：0.5  
+日期：2026-06-26  
+文档重点：玩法愿景、玩家体验与 Gameplay 流程。
+
+---
+
+## 核心概念
+
+Construct & Corrode 是一款步进式 Roguelite 战术游戏。玩家在棋盘地牢中阅读局势，逐格移动，从地形中获取相互对立的构成与蚀变力量，准备单次阈值击杀，引导敌人友伤，并在关键时刻消耗稀缺的棋子变身来突破默认移动规则。
+
+游戏围绕一个问题展开：**下一步最有价值的行动是什么？** 每一次移动都会改变站位、资源状态、敌人节奏和后续击杀可能。
+
+## 类型与体验
+
+- **类型**：步进式回合战术、Roguelite、网格策略、轻解谜战术。
+- **单局形态**：短小战术楼层串联成一次 Run。
+- **核心目标**：清除当前楼层内全部敌人。
+- **失败条件**：玩家 HP 降至 0。
+- **核心感受**：有压力但可读、每一步都有取舍，并能把危险棋盘转化为计划好的清场链。
+
+## 玩家幻想
+
+玩家不是依靠蛮力推进的战士，而是夹在两股对立力量之间的棋盘战术师：
+
+- **构成**：结构、几何、秩序、硬边、受控增长。
+- **蚀变**：酸蚀、侵蚀、高饱和、不稳定爆发、破坏性流动。
+
+玩家通过吸收两种力量、判断何时专注一边、何时切换方向、何时让敌人互相摧毁来生存。
+
+## 设计支柱
+
+1. **每一步都是决策**  
+   默认移动是四方向单格移动。有效行动会推进回合，因此一次看似简单的换位也有战术成本。
+
+2. **地形就是资源经济**  
+   地块不是被动背景。构成、蚀变、极简与障碍共同决定路线、属性成长、击杀准备和局部控场。
+
+3. **击杀来自准备，而不是刮血**  
+   敌人不走连续扣血。玩家必须在一次行动中达到正确的击杀阈值，形成“准备、预判、释放”的节奏。
+
+4. **敌人阵营也是谜题的一部分**  
+   对立阵营敌人可以通过远程攻击线和同格冲突互相击杀。危险敌人也能成为玩家清场的工具。
+
+5. **特殊移动是战术爆点**  
+   棋子变身是稀缺的一次性移动资源。它制造关键突破，但不取代普通网格移动带来的紧张感。
+
+6. **规则必须一眼可读**  
+   玩家应能通过地块颜色、敌人阵营语言、攻击预览、移动高亮和清晰反馈理解接下来会发生什么。
+
+## 核心 Gameplay 循环
+
+### 单步循环
+
+1. 阅读棋盘：地形类型、敌人阵营、敌人行为、攻击线、安全格和当前属性。
+2. 选择行动：移动、攻击、使用转换能量，或消耗棋子变身。
+3. 结算玩家行动：获得地形力量，触发拾取物，尝试阈值击杀，或重新站位。
+4. 结算敌人意图：近战敌人逼近或攻击，远程敌人瞄准或开火。
+5. 更新棋盘：威胁、可移动格、属性、剩余敌人和 Run 状态重新变得可读。
+
+### 楼层循环
+
+1. 进入一个战术楼层。
+2. 通过地形移动积累构成或蚀变值。
+3. 针对敌对阵营准备击杀阈值。
+4. 利用友伤、压制、地形转换和棋子变身清理敌群。
+5. 清除全部敌人后进入更深层的 Run。
+
+### Run 循环
+
+1. 从低资源和可读棋盘开始。
+2. 在敌人密度和阈值压力逐渐提高的楼层中推进。
+3. 获取恢复 HP 或提供棋子变身的拾取物。
+4. 追求更深楼层和更快通关记录。
+5. 失败后结束本次 Run，并用更好的战术理解再次尝试。
+
+## 棋盘阅读
+
+棋盘是游戏的主要语言。一个好回合来自对五层信息的阅读：
+
+| 层级 | 玩家问题 |
+| --- | --- |
+| 地形 | 哪些地块能增长构成或蚀变？哪些路线使用后会变为中性？ |
+| 敌人阵营 | 这个敌人能被哪种伤害击杀？会免疫哪种伤害？ |
+| 敌人行为 | 这是近战压力、远程压力，还是友伤机会？ |
+| 节奏 | 这一步会触发安全敌方回合、敌人攻击，还是下一回合的准备？ |
+| 突破选项 | 现在是否值得消耗转换能量或棋子变身？ |
+
+预期的玩家节奏是：**观察、预判、承诺、结算、重新阅读**。
+
+## 地形与属性经济
+
+玩家拥有两条相互对立的属性：
+
+| 属性 | 作用 |
+| --- | --- |
+| 构成 | 击杀蚀变敌人的伤害来源，也是压制构成敌人的路线。 |
+| 蚀变 | 击杀构成敌人的伤害来源，也是压制蚀变敌人的路线。 |
+
+地形驱动这些数值：
+
+| 地块类型 | 玩法含义 |
+| --- | --- |
+| 构成地块 | 增加构成、降低蚀变，随后变为极简地块。 |
+| 蚀变地块 | 增加蚀变、降低构成，随后变为极简地块。 |
+| 极简地块 | 不改变属性的中性移动空间。 |
+| 障碍地块 | 塑造路线、视线和敌人接近路径。 |
+
+这形成了柔性的路线规划谜题。玩家不是单纯走向敌人，而是在选择一条能够构建未来击杀条件的路径。
+
+## 战斗语法
+
+### 双伤害
+
+玩家每次攻击同时携带当前两条属性值：
+
+- 构成伤害等于当前构成值。
+- 蚀变伤害等于当前蚀变值。
+
+### 阵营免疫
+
+| 目标 | 免疫 | 可被击杀方式 |
+| --- | --- | --- |
+| 构成敌人 | 构成伤害 | 蚀变伤害达到击杀阈值。 |
+| 蚀变敌人 | 蚀变伤害 | 构成伤害达到击杀阈值。 |
+
+### 阈值击杀规则
+
+只有当正确的非免疫伤害在一次行动中达到或超过击杀阈值时，敌人才会被击败。若未达到阈值，本次攻击不会让敌人被部分削弱。
+
+这个规则的目的，是让攻击成为战术处决，而不是反复换血。玩家需要问自己：**现在已经准备好出手了吗，还是应该再用一回合塑造棋盘？**
+
+## 压制
+
+当玩家某一属性达到满值时，对应阵营敌人会进入压制状态并停止主动攻击。
+
+| 满值属性 | 被压制阵营 |
+| --- | --- |
+| 构成满值 | 构成敌人 |
+| 蚀变满值 | 蚀变敌人 |
+
+压制是一种节奏工具。它能在短时间内改变威胁结构，但不会移除阵营免疫。被压制的敌人更安全，但仍需要正确的对立伤害才能击杀。
+
+## 敌人设计
+
+敌人由两个可读维度构成：
+
+| 维度 | 选项 |
+| --- | --- |
+| 阵营 | 构成或蚀变 |
+| 行为 | 近战或远程 |
 
 ### 近战敌人
 
-- 相邻玩家时攻击。
-- 不相邻时使用四方向寻路接近玩家。
-- 被对应满值属性压制时不主动攻击。
+近战敌人制造空间压力。它们靠近玩家，并在相邻时攻击。它们的作用是让局部站位变得重要，并惩罚粗心路线。
 
 ### 远程敌人
 
-- 攻击范围为四向直线。
-- 与玩家同轴且无遮挡时进入瞄准状态。
-- 下一次远程结算窗口释放攻击线。
-- 若玩家离开锁定线，则不会受到该次远程伤害。
-- 远程攻击可击杀异阵营敌人，并支持同窗口同步死亡。
+远程敌人制造线性压力。它们威胁直线通道，先瞄准再开火，让玩家决定闪避、诱导，还是利用这条攻击线。
 
-### 敌人管理
+### 友伤与冲突
 
-- 敌人由 `AGridEnemyManager` 注册、行动、清理和统计。
-- 所有敌人死亡后广播清场事件。
-- `ADungeonRunManager` 监听清场事件并完成当前关卡。
+对立阵营敌人可以互相摧毁：
 
----
+- 远程攻击命中对立阵营敌人时，会击杀该敌人。
+- 对立阵营远程敌人的攻击若在同一结算窗口对齐，可以互相击杀。
+- 对立阵营近战敌人发生同格冲突时，根据相遇地形结算：构成地形偏向构成，蚀变地形偏向蚀变，极简地形偏向击杀阈值更低的一方，若相同则双方死亡。
 
-## 关卡与难度
+这让敌人分布本身成为资源。玩家会因为不仅把敌人看作威胁，也把它们看作清场链中的棋子而获得奖励。
 
-### 正式关卡成长
+## 地形转换能量
 
-正式 Run 按关卡编号派生运行时生成参数：
+地形转换能量是通过击杀获得的有限棋盘改写工具。
 
-- 目标房间数随关卡增加。
-- 敌人数量随关卡增加。
-- 拾取物数量随关卡增加。
-- 敌人击杀阈值可按房间深度增加。
-
-当前胜利不是到达出口，而是清除所有敌人。出口格已作为布局语义保留，后续可扩展为关卡出口、奖励房或分支选择。
-
-### 教学关卡结构
-
-教学关卡按规则学习顺序组织：
-
-| 关卡 | 学习目标 |
+| 规则 | 设计目的 |
 | --- | --- |
-| 教学 1 | 地块属性变化与极简化 |
-| 教学 2 | 单次阈值击杀与阵营免疫 |
-| 教学 3 | 击杀获得能量与 3x3 地块转换 |
-| 教学 4 | 远程瞄准、攻击线与异阵营友伤 |
-| 教学 5 | 构成/酸性满值压制 |
-| 教学 6 | HP 恢复、变身拾取、轮盘与特殊移动 |
+| 通过击杀获得 | 用新的战术选项奖励成功准备。 |
+| 存储量有限 | 鼓励使用，而不是囤积。 |
+| 转换玩家周围 3x3 区域 | 制造局部、可读的地形控制爆发。 |
 
----
+玩家使用地形转换能量来：
 
-## UI、反馈与可读性
+- 创造缺失的属性资源，
+- 准备未来的阈值击杀，
+- 改变近战敌人冲突结果，
+- 创造压制路线，
+- 在棋盘资源枯竭时恢复策略空间。
 
-### HUD
+## 棋子变身
 
-当前 HUD 需要清晰显示：
+棋子变身是消耗型移动形态。它们被设计成稀缺的战术突破，而不是默认移动方式。
 
-- HP。
-- 构成值与酸性值。
-- 地块转换能量持有状态。
-- 当前关卡编号。
-- Run 计时。
-- 当前剩余敌人数。
-- 变身棋子库存。
-- 教学步骤提示。
-
-### 战斗预览
-
-Combat Preview 用于降低规则理解成本：
-
-- 显示玩家当前攻击是否可击杀目标。
-- 显示敌人是否能在下一回合攻击玩家。
-- 变身目标选择时，基于悬停目标刷新预览。
-
-### 地图反馈
-
-- 玩家可移动格在输入阶段高亮。
-- 玩家行动与敌人回合阶段清空过期提示。
-- 变身目标格高亮。
-- 鼠标悬停合法目标格时显示额外反馈。
-- 远程敌人瞄准线必须清晰可读。
-
-### 相机
-
-- 战斗相机支持聚焦与恢复。
-- 使用地块转换能量时可接入长按镜头反馈。
-- 变身目标选择支持边缘滚屏，帮助玩家查看远距离目标。
-
-### 菜单
-
-- 设置菜单管理 BGM/SFX 音量。
-- Pause 菜单通过事件广播表达按钮意图。
-- 当前完整暂停恢复、主菜单跳转和退出游戏流程仍需在蓝图/流程层补齐。
-
----
-
-## 音频设计
-
-当前音频系统由全局 Subsystem 统一管理：
-
-- 主菜单 BGM 与关卡 BGM 分离。
-- BGM 切换使用淡入淡出。
-- 玩家事件音效包括攻击、击杀、变身、获得能量、准备使用能量、使用能量、拾取、属性增长、属性满值和死亡。
-- 敌人音效按敌人 Profile 配置近战攻击、远程瞄准、远程攻击和死亡。
-- 关卡流程音效包括开始、切换、胜利和失败。
-- UI 音效包括 Hover 和 Click。
-- 每个事件槽支持多个音效随机播放。
-
-设计目标是让声音强化“准备、确认、击杀、失败、转换”这些战术节点，而不是只作为装饰反馈。
-
----
-
-## 美术方向
-
-### 构成主义
-
-- 几何、硬边、模块化、网格感。
-- 地块纹理强调线条、结构、秩序和冷静的空间划分。
-- 敌人外形偏向稳定块面和明确轮廓。
-
-### 酸性设计
-
-- 高饱和、流体、侵蚀、噪声、荧光感。
-- 地块纹理强调流动、腐蚀、非对称和不稳定边界。
-- 敌人外形偏向有机扰动和强烈色彩冲突。
-
-### 棋子化角色
-
-- 玩家和变身形态应保持棋子轮廓辨识度。
-- 小尺寸俯视视角下，形态识别优先于细节复杂度。
-- 变身外观切换要足够即时，让玩家确认已进入特殊移动模式。
-
----
-
-## 技术实现依据
-
-当前工程为单运行时模块 `Chessboard_Roguelike`，主要系统边界如下：
-
-| 系统 | 代表类型 | 设计职责 |
+| 形态 | 移动幻想 | 战术用途 |
 | --- | --- | --- |
-| 棋盘与地块 | `AGridManager`、`FTileData`、`FGridTileLayoutData` | 棋盘数据、地块实例、占据状态、布局应用 |
-| 回合 | `ATurnManager`、`ETurnState` | 回合锁、状态切换、步数推进 |
-| 玩家 | `AGridPawn`、`AGridPlayerController` | 默认移动、攻击入口、输入状态、变身选择 |
-| 属性 | `UPlayerAttributeComponent` | HP、构成值、酸性值、压制判断 |
-| 地块效果 | `UTileEffectResolverComponent`、`UTileAttributeEffectConfig` | 进入地块后的属性变化 |
-| 战斗 | `UCombatResolverComponent`、`FCombatResolveResult` | 伤害、免疫、阈值击杀、友伤 |
-| 敌人 | `AGridEnemyPawn`、`AGridEnemyManager` | 敌人 AI、远程调度、清场事件 |
-| PCG | `UDungeonGenerationSettings`、`ULSystemDungeonGenerator`、`ADungeonRunManager` | L-System 地牢、关卡初始化、关卡推进、难度缩放 |
-| 拾取物 | `AGridPickupActor`、`AGridPickupManager` | 拾取注册、触发与清理 |
-| 变身 | `UPlayerTransformInventoryComponent`、`UChessPieceFormData`、`UTransformWheelWidget` | 棋子库存、形态配置、轮盘 UI |
-| 教学 | `UTutorialLevelSet`、`UTutorialFlowComponent` | 固定教学地图与分步教学 |
-| 音频 | `UGameAudioSubsystem`、`UGameAudioSettingsDataAsset` | BGM、事件音效、音量 |
-| 存档记录 | `URunRecordSaveGame`、`URunRecordBlueprintLibrary` | 最远关卡与最快时间 |
-| UI | `UPlayerAttributeHUDWidget`、`USettingsMenuWidget`、`UPauseMenuWidget` | HUD、设置、暂停与记录展示 |
+| Knight | L 形跳跃 | 越过压力、抵达精确目标、逃离封锁路线。 |
+| Bishop | 斜线滑行 | 切入斜向通道，从意外角度攻击。 |
+| Rook | 直线滑行 | 穿越长直路线，惩罚开阔通道。 |
+| Queen | 八方向滑行 | 消耗强力选项，获得最大范围与灵活性。 |
 
----
+变身流程应像一次明确的承诺：
 
-## 当前边界与后续设计空间
+1. 玩家打开变身选择。
+2. 选择的形态预览合法目标。
+3. 玩家确认移动或捕获。
+4. 消耗该形态并恢复普通移动。
 
-### 已进入当前设计基线
+## 拾取物
 
-- 默认四向移动与步进式回合。
-- 构成/酸性/极简/障碍地块。
-- 双属性值、满值压制、HP 失败。
-- 敌人免疫、单次阈值击杀、未击杀退回。
-- 近战敌人、远程敌人、攻击线和跨阵营友伤。
-- 地块转换能量与 3x3 转换。
-- 生命恢复物与变身棋子拾取。
-- Knight、Bishop、Rook、Queen 四种变身移动。
-- L-System PCG 正式关卡。
-- 6 个固定教学关卡。
-- HUD、Combat Preview、音频、菜单和 Run 记录基础。
+拾取物是简单、可读的奖励，用于支持 Run，而不稀释棋盘战术焦点。
 
-### 暂未作为当前基线完成
-
-- 完整剧情、角色对白和世界观推进。
-- 永久成长、解锁、商店、遗物或构筑系统。
-- Boss、精英敌人和复杂环境事件。
-- 出口驱动的关卡完成条件。
-- 完整暂停恢复、主菜单跳转和退出游戏闭环。
-- 跨启动保存 BGM/SFX 音量。
-- 完整数值平衡和正式内容难度曲线。
-
----
-
-## 平衡参数
-
-后续应持续外置和调优以下参数：
-
-| 参数 | 当前用途 |
+| 拾取物 | 作用 |
 | --- | --- |
-| 玩家 HP / 最大 HP | 生存压力 |
-| 构成/酸性上下限 | 输出上限与压制阈值 |
-| 地块属性增减值 | 成长速度 |
-| 敌人击杀阈值 | 击杀准备难度 |
-| 敌人攻击伤害 | 生命与属性惩罚强度 |
-| 远程攻击距离 | 远程威胁范围 |
-| 转换能量上限 | 地图重塑频率 |
-| 3x3 转换范围 | 地图重塑强度 |
-| 变身道具生成权重 | 特殊移动频率 |
-| 变身形态距离与阻挡规则 | 空间突破强度 |
-| 每关目标房间数 | 关卡长度 |
-| 每关敌人数 | 压力密度 |
-| 每关拾取物数 | 资源补给 |
-| 深度阈值加成 | 后期难度 |
-| 地块比例 | 属性路线可用性 |
+| HP 恢复 | 在高代价决策或敌人压力后延长 Run。 |
+| 棋子形态 | 为玩家库存增加一次战术突破机会。 |
 
----
+拾取物应作为有意义的路线诱因。一个拾取物最有价值的时刻，是到达它本身就形成一个有趣站位问题的时候。
 
-## 风险与验证重点
+## 难度与推进
 
-- 双属性与免疫规则理解成本较高，教学和 Combat Preview 必须足够清晰。
-- 单次阈值击杀容易造成“差一点也等于无效”的挫败感，需要强化预览与反馈。
-- 地块转换如果过强，会让地图资源规划失去意义；如果过弱，则玩家不会主动使用。
-- 变身棋子可能绕过过多敌人威胁，需要通过掉落率、库存、合法目标和敌人布局控制价值。
-- 远程敌人与友伤若提示不清，会从策略机会变成不可预期惩罚。
-- PCG 精确房间数与可达性约束需要持续验证生成稳定性。
-- 正式 Run 的胜利条件目前是清敌，出口语义尚未转化为玩法目标，需要避免 UI 或关卡表现误导玩家。
+Run 的成长来自棋盘压力，而不是隐藏复杂度。
 
----
+| 推进变量 | 玩法效果 |
+| --- | --- |
+| 更多房间与路线 | 增加规划空间和导航压力。 |
+| 更多敌人 | 提高威胁阅读密度，也创造更多友伤机会。 |
+| 更多拾取物 | 在压力上升时提供恢复与变身选择。 |
+| 更高击杀阈值 | 要求更有意识的地形路线与属性准备。 |
 
-## 变更日志
+预期难度曲线要求玩家逐渐更擅长阅读模式、编排行动顺序，并保留关键突破工具。
 
-- 0.1：初始完整草案，建立构成/酸性、地块资源、阈值击杀与回合制框架。
-- 0.2：修改地块转换能量设定。
-- 0.3：细化敌人友伤规则，加入变身棋子系统草案。
-- 0.4：结合当前技术文档与代码更新项目现状；纳入 L-System PCG、关卡推进、Run 记录、6 个教学关卡、变身背包与轮盘、拾取物、Combat Preview、音频系统、菜单系统和当前实现边界。
+## 教学流程
+
+教学关卡是固定的战术课程。它们每次介绍一个概念，并要求玩家通过正常玩法完成它。
+
+| 教学 | 学习目标 |
+| --- | --- |
+| 1 | 地块变化与极简地块。 |
+| 2 | 阈值击杀与阵营免疫。 |
+| 3 | 击杀奖励与 3x3 地形转换。 |
+| 4 | 远程瞄准线与跨阵营友伤。 |
+| 5 | 满属性压制。 |
+| 6 | HP 恢复、变身拾取、变身选择与特殊移动。 |
+
+教学目标不是用文本解释所有规则，而是让玩家在受控空间中亲自执行规则，并在正式 Run 中认出它。
+
+## 反馈与可读性
+
+游戏应持续回答：**我能做什么、会发生什么、刚才为什么发生？**
+
+| 反馈需求 | 呈现目标 |
+| --- | --- |
+| 可移动范围 | 在玩家输入阶段高亮合法可达地块。 |
+| 攻击结果 | 预览当前攻击是否能击杀目标。 |
+| 敌人威胁 | 清晰显示近战危险与远程瞄准线。 |
+| 属性状态 | 保持 HP、构成、蚀变、转换能量和变身库存可见。 |
+| 回合节奏 | 让玩家行动、敌人行动和棋盘更新具有清晰区分。 |
+| 变身目标 | 预览合法目标与移动后的危险。 |
+
+好的反馈应降低规则困惑，同时保留决策压力。
+
+## 音频方向
+
+音频用于支撑棋盘的战术节奏。
+
+- 移动应精确、明确、具有步进感。
+- 属性增长应让地形显得有价值。
+- 阈值击杀应果断有力。
+- 攻击失败应清楚表达玩家尚未准备好。
+- 地形转换与棋子变身应听起来像稀缺且有意图的工具。
+- 敌人瞄准与远程攻击应制造可读的预兆。
+
+目标不是持续制造噪音，而是为战术节点配音：**准备、确认、击杀、转换、生存**。
+
+## 视觉方向
+
+### 构成
+
+构成视觉强调几何、硬边、模块化形状、结构线条和受控空间。
+
+### 蚀变
+
+蚀变视觉强调高饱和、流动、侵蚀、噪声、非对称和不稳定边界。
+
+### 棋子识别
+
+玩家和变身形态需要在俯视战术视角下保持可读。轮廓清晰度优先于细节复杂度。
+
+## 当前玩法范围
+
+当前玩法设计基线包含：
+
+- 步进式四方向移动，
+- 构成、蚀变、极简和障碍地形，
+- 双属性与压制，
+- 阈值击杀与阵营免疫，
+- 近战敌人与远程敌人，
+- 友伤与对立阵营冲突，
+- 3x3 地形转换能量，
+- HP 恢复与棋子拾取，
+- Knight、Bishop、Rook、Queen 四种变身，
+- 程序化 Run 楼层，
+- 六个固定教学关卡，
+- 战斗预览、HUD 反馈、菜单流程、音频反馈和 Run 记录。
+
+后续设计空间包括更完整的叙事包装、永久成长、定义构筑的遗物、商店、精英敌人、Boss，以及更多样的楼层目标。
+
+## 设计总结
+
+Construct & Corrode 的核心是把移动变成准备。玩家通过阅读地形、构建正确属性、预判敌人行为，并选择最关键的一步，把危险棋盘转化为战术机会。
